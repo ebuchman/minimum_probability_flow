@@ -111,16 +111,19 @@ class metaMPF():
 		batch_stop = T.minimum(n_ex, (index + 1)*batch_size)
 		effective_batch_size = batch_stop - batch_start
 
+		
 		K, dK = self.mpf.rbm_K_dK(self.X, effective_batch_size)
 
+		print "compiling theano functions"
 		get_batch_size = theano.function([index, n_ex], effective_batch_size, allow_input_downcast=True, name='get_batch_size')
 		batch_cost = theano.function([index, n_ex], [K, dK], givens={self.X: train_X[batch_start:batch_stop, :]}, allow_input_downcast=True, name='batch_cost')
 
+		print "actually training ..."
 
 		if optimizer == 'sgd':
 			pass
 
-		elif optimizer == 'cg' or optimizer == 'l_bfgs_b':
+		elif optimizer == 'cg' or optimizer == 'bfgs':
 
 			def train_fn(theta_value):
 
@@ -144,12 +147,16 @@ class metaMPF():
 				w0, bh0, bv0 = param_init
 				self.mpf.theta.set_value(np.asarray(np.concatenate((w0, bh0, bv0)), dtype=theano.config.floatX))
 
+			from scipy.optimize import minimize
 			if optimizer == 'cg':
 				pass
-			elif optimizer == 'l_bfgs_b':
-				print 'using l_bfgs_b'
-				from scipy.optimize import fmin_l_bfgs_b
-				theta_opt, f_theta_opt, info = fmin_l_bfgs_b(train_fn, self.mpf.theta.get_value(), iprint=1, maxfun=self.n_epochs)
+			elif optimizer == 'bfgs':
+				print 'using bfgs'
+				#theta_opt, f_theta_opt, info = fmin_l_bfgs_b(train_fn, self.mpf.theta.get_value(), iprint=1, maxfun=self.n_epochs)
+				start = time.time()
+				result_obj = minimize(train_fn, self.mpf.theta.get_value(), jac=True, method='BFGS', options={'maxiter':11})
+				end = time.time()
+				theta_opt = result_obj.x
 
 		elif optimizer == 'sof':
 
@@ -174,20 +181,69 @@ class metaMPF():
 			sys.path.append('/export/mlrg/ebuchman/Programming/Sum-of-Functions-Optimizer')
 			from sfo import SFO
 			optimizer = SFO(train_fn, self.mpf.theta.get_value(), np.arange(n_batches))
+			start = time.time()
 			theta_opt = optimizer.optimize(num_passes = self.n_epochs)
+			end = time.time()
 
 		
-		self.mpf.theta.set_value(theta_opt, borrow=True)
+		self.mpf.theta.set_value(theta_opt.astype(theano.config.floatX), borrow=True)
+		return end-start
+
+def cd_rbm(nv, nh, batch_size, n_epochs, X, params, k):
+	from cd_rbm import test_rbm
+	if k == 0:
+		print 'k must be nonzero'
+		quit()
+
+	start = time.time()
+	W, bh, bv, t= test_rbm(X, learning_rate=0.1, training_epochs=n_epochs, batch_size=batch_size,
+             n_chains=1, n_samples=10, output_folder='rbm_plots',
+             n_hidden=5, nvisible=10, k=k)
+	end = time.time()
+	params_fit = [W, bh, bv]
+	dkl = compute_dkl(params, params_fit)
+	#L_true = compute_likelihood(params, X)
+	#L_fit = compute_likelihood(params_fit, X)
+
+	#print 'fit dkl: ', dkl
+	#print 'true nll', -L_true
+	#print 'fit nll', -L_fit
+
+	print 'saving to results_cd.dat!'
+	f = open('results.dat', 'a')
+	f.write('CD-%d & %.4f & %.4f & %d \\\\\n'%(k, dkl, t, n_epochs))
+	f.close()
+
+
+
+def train(nv, nh, batch_size, n_epochs, X, optimizer, params, param_init, k=0):
+	if 'cd' in optimizer:
+		cd_rbm(nv, nh, batch_size, n_epochs, X, params, k)
+	else:
+		param_init[0] = param_init[0].reshape(nv*nh)
+
+		print 'initializing mpf'
+		model = metaMPF(nv, nh, batch_size, n_epochs)
+		print "training", optimizer
+		start = time.time()
+		t = model.fit(train_X = X, optimizer = optimizer, param_init = param_init)
+		end = time.time()
+		params_fit = split_theta(model.mpf.theta.get_value(), nv, nh)
+
+		dkl = compute_dkl(params, params_fit)
+
+		print 'saving to results.dat!'
+		f = open('results.dat', 'a')
+		f.write('MPF(%s) & %.4f & %.4f & %d \\\\\n'%(optimizer, dkl, t, n_epochs))
+		f.close()
 
 
 def test_mpf():
 
-	nv, nh = 20, 10
+	nv, nh = 10,5
 	batch_size = 100
 	n_epochs = 10
 	n_train = 1000
-	#optimizer = 'l_bfgs_b'
-	optimizer = 'sof'
 
 	print 'generating data'
 	samples, params = random_rbm(nv, nh, 1000, sample_every=100, burnin=1000)	
@@ -200,27 +256,59 @@ def test_mpf():
 	L_rand = compute_likelihood(param_init, X)
 	dkl_rand = compute_dkl(params, param_init)
 
-	param_init[0] = param_init[0].reshape(nv*nh)
-
-	print 'initializing mpf'
-	model = metaMPF(nv, nh, batch_size, n_epochs)
-	model.fit(train_X = X, optimizer = optimizer, param_init = param_init)
-	params_fit = split_theta(model.mpf.theta.get_value(), nv, nh)
-
-	dkl = compute_dkl(params, params_fit)
-	L_true = compute_likelihood(params, X)
-	L_fit = compute_likelihood(params_fit, X)
-
 	print 'init dkl', dkl_rand
 	print 'init nll', -L_rand
 	print ''
-	print 'fit dkl: ', dkl
-	print 'true nll', -L_true
-	print 'fit nll', -L_fit
+
+	train(nv, nh, batch_size, 10, X, 'cd', params, param_init, k=1)
+	train(nv, nh, batch_size, 100, X, 'cd', params, param_init, k=1)
+	train(nv, nh, batch_size, 10, X, 'cd', params, param_init, k=10)
+	train(nv, nh, batch_size, 100, X, 'cd', params, param_init, k=10)
+	train(nv, nh, batch_size, 5, X, 'bfgs', params, param_init)
+	train(nv, nh, batch_size, 10, X, 'bfgs', params, param_init)
+	train(nv, nh, batch_size, 20, X, 'bfgs', params, param_init)
+	train(nv, nh, batch_size, 5, X, 'sof', params, param_init)
+	train(nv, nh, batch_size, 10, X, 'sof', params, param_init)
+	train(nv, nh, batch_size, 20, X, 'sof', params, param_init)
+	
+
+def train_mnist():
+	nv, nh = 28*28, 500
+	batch_size = 100
+	n_epochs = 10
+
+	print 'generating data'
+	f = open('/export/mlrg/ebuchman/datasets/mnistSMALL.pkl')
+	d = pickle.load(f)
+	f.close()
+	tr, val, ts = d
+	X = tr[0]
+
+	theta_init = random_theta(nv, nh)
+	param_init = split_theta(theta_init, nv, nh)
+
+	param_init[0] = param_init[0].reshape(nv*nh)
+
+	optimizer = 'bfgs'
+
+	print 'initializing mpf'
+	model = metaMPF(nv, nh, batch_size, n_epochs)
+	print "training", optimizer
+	start = time.time()
+	model.fit(train_X = X, optimizer = optimizer, param_init = param_init)
+	end = time.time()
+	params_fit = split_theta(model.mpf.theta.get_value(), nv, nh)
+
+	samples = sample_rbm(W, bh, bv, 20, sample_every=1000, burnin=1000)
+	f = open('tosave.pkl')
+	pickle.dump([samples, params_fit], f)
+	f.close()
+
 
 
 if __name__=='__main__':
 
+	#	train_mnist()
 
 	test_mpf()
 	quit()
