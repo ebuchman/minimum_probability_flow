@@ -15,7 +15,6 @@ def random_theta(nv, nh):
 	return np.asarray(np.concatenate((w0, bh0, bv0)), dtype=theano.config.floatX)
 
 def split_theta(theta, nv, nh):
-
 	param_idx = 0
 	w = theta[param_idx:param_idx+nv*nh].reshape(nv, nh)
 	param_idx += nv*nh
@@ -27,57 +26,59 @@ def split_theta(theta, nv, nh):
 	param_idx += nv
 
 #	assert(param_idx == theta_shape)
-
 	return [w, bh, bv]
-	
 
 
 class MPF(object):
-    def __init__(self, n_visible, n_hidden):
-        self.n_visible = n_visible
-        self.n_hidden = n_hidden
+	def __init__(self, n_visible, n_hidden):
+		self.n_visible = n_visible
+		self.n_hidden = n_hidden
 
-        D, DH = self.n_visible, self.n_hidden
+		D, DH = self.n_visible, self.n_hidden
 
-        theta_shape = D*DH + D + DH
-        self.theta = theano.shared(value=np.zeros(theta_shape, dtype=theano.config.floatX))
-        self.theta.name = 'theta'
+		theta_shape = D*DH + D + DH
+		self.theta = theano.shared(value=np.zeros(theta_shape, dtype=theano.config.floatX))
+		self.theta.name = 'theta'
 
-        self.theta_update = theano.shared(value=np.zeros(theta_shape, dtype=theano.config.floatX))
+		self.theta_update = theano.shared(value=np.zeros(theta_shape, dtype=theano.config.floatX))
 
-        param_idx = 0
+		param_idx = 0
 
-        self.W = self.theta[param_idx : param_idx + D*DH].reshape((D, DH), 2)
-        self.W.name = 'W'
-        param_idx += D*DH
+		self.W = self.theta[param_idx : param_idx + D*DH].reshape((D, DH), 2)
+		self.W.name = 'W'
+		param_idx += D*DH
 
-        self.bh = self.theta[param_idx : param_idx + DH]
-        self.bh.name = 'bh'
-        param_idx += DH
+		self.bh = self.theta[param_idx : param_idx + DH]
+		self.bh.name = 'bh'
+		param_idx += DH
 
-        self.bv = self.theta[param_idx : param_idx + D]
-        self.bv.name='bv'
-        param_idx += D
+		self.bv = self.theta[param_idx : param_idx + D]
+		self.bv.name='bv'
+		param_idx += D
 
-        self.L1 = abs(self.W.sum())
-        self.L2 = (self.W ** 2).sum()
+		self.L1 = abs(self.W.sum())
+		self.L2 = (self.W ** 2).sum()
 
-    def rbm_K(self, X, effective_batch_size):
-        D, DH = self.n_visible, self.n_hidden
-        W, bh, bv = self.W, self.bh, self.bv
+	def rbm_K(self, X, effective_batch_size):
+		D, DH = self.n_visible, self.n_hidden
+		W, bh, bv = self.W, self.bh, self.bv
 
-        Y = X.reshape((effective_batch_size, 1, D), 3) * T.ones((1, D, 1)) #tile out data vectors (repeat each one D times)
-        Y = (Y + T.eye(D).reshape((1, D, D), 3))%2 # flip each bit once 
+		Y = X.reshape((effective_batch_size, 1, D), 3) * T.ones((1, D, 1)) #tile out data vectors (repeat each one D times)
+		Y = (Y + T.eye(D).reshape((1, D, D), 3))%2 # flip each bit once 
 
-        Z = T.exp(0.5*energy(X, W, bh, bv))
-        Z.name = 'Z'
-        Y = T.exp(-0.5*energy(Y, W, bh, bv)).reshape((effective_batch_size, D), 2)
-        Y.name = 'Y'
+		Z = T.exp(0.5*(energy(X, W, bh, bv).dimshuffle(0, 'x') - energy(Y, W, bh, bv)))
+		K = T.sum(Z) / effective_batch_size
+		K.name = 'K'
+		'''
+		Z = T.exp(0.5*energy(X, W, bh, bv))
+		Z.name = 'Z'
+		Y = T.exp(-0.5*energy(Y, W, bh, bv)).reshape((effective_batch_size, D), 2)
+		Y.name = 'Y'
 
-        K = T.sum(Z*T.sum(Y, axis=-1))  / effective_batch_size #+ 0.0001*T.sum(W**2)
-        K.name = 'K'
-
-        return K
+		K = T.sum(Z*T.sum(Y, axis=-1))  / effective_batch_size #+ 0.0001*T.sum(W**2)
+		K.name = 'K'
+		'''
+		return K
 
 class metaMPF():
     def __init__(self, nv, nh, batch_size, n_epochs, learning_rate=0.01, learning_rate_decay=1, initial_momentum=0.5, final_momentum=0.9, momentum_switchover=5, L1_reg=0.00, L2_reg=0.00):
@@ -103,126 +104,128 @@ class metaMPF():
         return theano.shared(np.asarray(data_X, dtype=theano.config.floatX))
 
     def fit(self, train_X, optimizer, param_init = None):
-        n_train, n_vis = train_X.shape
-        batch_size = self.batch_size
+		n_train, n_vis = train_X.shape
+		batch_size = self.batch_size
 
-        assert(n_vis == self.nv)
+		#theano.config.profile = True
 
-        train_X = self.shared_dataset(train_X)
-        n_batches = np.ceil(n_train / float(batch_size)).astype('int')
+		assert(n_vis == self.nv)
 
-        index, n_ex = T.iscalars('batch_index', 'n_ex')
+		train_X = self.shared_dataset(train_X)
+		n_batches = np.ceil(n_train / float(batch_size)).astype('int')
 
-        batch_start = index*batch_size
-        batch_stop = T.minimum(n_ex, (index + 1)*batch_size)
-        effective_batch_size = batch_stop - batch_start
+		index, n_ex = T.iscalars('batch_index', 'n_ex')
 
-        lr = T.scalar('lr', dtype=theano.config.floatX)
-        mom = T.scalar('mom', dtype=theano.config.floatX)
+		batch_start = index*batch_size
+		batch_stop = T.minimum(n_ex, (index + 1)*batch_size)
+		effective_batch_size = batch_stop - batch_start
 
-        K = self.mpf.rbm_K(self.X, effective_batch_size)
-        cost = K + self.L1_reg * self.mpf.L1 + self.L2_reg * self.mpf.L2
+		lr = T.scalar('lr', dtype=theano.config.floatX)
+		mom = T.scalar('mom', dtype=theano.config.floatX)
 
-        grads = T.grad(cost, self.mpf.theta)
-        grads.name = 'G'
+		K = self.mpf.rbm_K(self.X, effective_batch_size)
+		cost = K + self.L1_reg * self.mpf.L1 + self.L2_reg * self.mpf.L2
 
-
-        print "compiling theano functions"
-        get_batch_size = theano.function([index, n_ex], effective_batch_size, allow_input_downcast=True, name='get_batch_size')
-        batch_cost = theano.function([index, n_ex], [cost, grads], givens={self.X: train_X[batch_start:batch_stop, :]}, allow_input_downcast=True, name='batch_cost')
-
-        print "actually training ..."
-
-        if optimizer == 'sgd':
-            updates = {}
-            theta = self.mpf.theta
-            theta_update = self.mpf.theta_update
-
-            upd = mom * theta_update - lr * grads
-            updates[theta_update] = upd
-            updates[theta] = theta + upd
-
-            # set up givens...
-            train_model = theano.function(inputs=[index, n_ex, lr, mom], outputs=cost, updates=updates, givens={self.X: train_X[batch_start:batch_stop]})
-
-            epoch = 0
-            start = time.time()
-            while epoch < self.n_epochs:
-                epoch += 1
-                effective_mom = self.final_momentum if epoch > self.momentum_switchover else self.initial_momentum
-
-                ### ....
-                for minibatch_idx in xrange(n_batches):
-                    avg_cost = train_model(minibatch_idx, n_train, self.learning_rate, effective_mom)
-                self.learning_rate *= self.learning_rate_decay
-            theta_opt = self.mpf.theta.get_value()
-            end = time.time()
-
-        elif optimizer == 'cg' or optimizer == 'bfgs':
-
-            def train_fn(theta_value):
-
-                self.mpf.theta.set_value(np.asarray(theta_value, dtype=theano.config.floatX), borrow=True)
-                #theta.set_value(theta_value, borrow=True)
-                train_losses_grads = [batch_cost(i, n_train) for i in xrange(n_batches)]
-
-                train_losses = [i[0] for i in train_losses_grads]
-                train_grads = [i[1] for i in train_losses_grads]
-
-                train_batch_sizes = [get_batch_size(i, n_train) for i in xrange(n_batches)]
-
-                return np.average(train_losses, weights=train_batch_sizes), np.average(train_grads, weights=train_batch_sizes, axis=0)
-
-            ###############
-            # TRAIN MODEL #
-            ###############
-            if param_init == None:
-                theta.set_value(random_theta(D, DH))
-            else:
-                w0, bh0, bv0 = param_init
-                self.mpf.theta.set_value(np.asarray(np.concatenate((w0, bh0, bv0)), dtype=theano.config.floatX))
-
-            from scipy.optimize import minimize
-            if optimizer == 'cg':
-                pass
-            elif optimizer == 'bfgs':
-                print 'using bfgs'
-                #theta_opt, f_theta_opt, info = fmin_l_bfgs_b(train_fn, self.mpf.theta.get_value(), iprint=1, maxfun=self.n_epochs)
-                start = time.time()
-                result_obj = minimize(train_fn, self.mpf.theta.get_value(), jac=True, method='BFGS', options={'maxiter':11})
-                end = time.time()
-                theta_opt = result_obj.x
-
-        elif optimizer == 'sof':
-
-            def train_fn(theta_value, i):
-                self.mpf.theta.set_value(np.asarray(theta_value, dtype=theano.config.floatX), borrow=True)
-
-                train_losses, train_grads = batch_cost(i, n_train)
-                
-                return train_losses, train_grads
-
-            ###############
-            # TRAIN MODEL #
-            ###############
-            if param_init == None:
-                theta.set_value(random_theta(D, DH))
-            else:
-                w0, bh0, bv0 = param_init
-                self.mpf.theta.set_value(np.asarray(np.concatenate((w0, bh0, bv0)), dtype=theano.config.floatX))
+		grads = T.grad(cost, self.mpf.theta)
+		grads.name = 'G'
 
 
-            print 'using sof'
-            sys.path.append('/export/mlrg/ebuchman/Programming/Sum-of-Functions-Optimizer')
-            from sfo import SFO
-            optimizer = SFO(train_fn, self.mpf.theta.get_value(), np.arange(n_batches))
-            start = time.time()
-            theta_opt = optimizer.optimize(num_passes = self.n_epochs)
-            end = time.time()
+		print "compiling theano functions"
+		get_batch_size = theano.function([index, n_ex], effective_batch_size, name='get_batch_size')
+		batch_cost = theano.function([index, n_ex], [cost, grads], givens={self.X: train_X[batch_start:batch_stop, :]}, name='batch_cost')
 
-        
-        self.mpf.theta.set_value(theta_opt.astype(theano.config.floatX), borrow=True)
-        return end-start
+		if param_init == None:
+			self.mpf.theta.set_value(random_theta(D, DH))
+		else:
+			w0, bh0, bv0 = param_init
+			self.mpf.theta.set_value(np.asarray(np.concatenate((w0, bh0, bv0)), dtype=theano.config.floatX))
+
+		print "actually training ..."
+
+		if optimizer == 'sgd':
+			updates = []
+			theta = self.mpf.theta
+			theta_update = self.mpf.theta_update
+
+			upd = mom * theta_update - lr * grads
+			updates.append((theta_update, upd))
+			updates.append((theta, theta + upd))
+
+			train_model = theano.function(inputs=[index, n_ex, lr, mom], outputs=cost, updates=updates, givens={self.X: train_X[batch_start:batch_stop]})
+
+			epoch = 0
+			start = time.time()
+			while epoch < self.n_epochs:
+				print 'epoch:', epoch
+				epoch += 1
+				effective_mom = self.final_momentum if epoch > self.momentum_switchover else self.initial_momentum
+
+				for minibatch_idx in xrange(n_batches):
+					avg_cost = train_model(minibatch_idx, n_train, self.learning_rate, effective_mom)
+					print '\t', minibatch_idx, avg_cost
+				self.learning_rate *= self.learning_rate_decay
+			theta_opt = self.mpf.theta.get_value()
+			end = time.time()
+
+		elif optimizer == 'cg' or optimizer == 'bfgs':
+
+			def train_fn(theta_value):
+
+				self.mpf.theta.set_value(np.asarray(theta_value, dtype=theano.config.floatX), borrow=True)
+				train_losses_grads = [batch_cost(i, n_train) for i in xrange(n_batches)]
+
+				train_losses = [i[0] for i in train_losses_grads]
+				train_grads = [i[1] for i in train_losses_grads]
+
+				train_batch_sizes = [get_batch_size(i, n_train) for i in xrange(n_batches)]
+
+				return np.average(train_losses, weights=train_batch_sizes), np.average(train_grads, weights=train_batch_sizes, axis=0)
+
+			###############
+			# TRAIN MODEL #
+			###############
+
+			from scipy.optimize import minimize
+			if optimizer == 'cg':
+				pass
+			elif optimizer == 'bfgs':
+				print 'using bfgs'
+				#theta_opt, f_theta_opt, info = fmin_l_bfgs_b(train_fn, self.mpf.theta.get_value(), iprint=1, maxfun=self.n_epochs)
+				start = time.time()
+				result_obj = minimize(train_fn, self.mpf.theta.get_value(), jac=True, method='BFGS', options={'maxiter':11})
+				end = time.time()
+				theta_opt = result_obj.x
+
+		elif optimizer == 'sof':
+
+			def train_fn(theta_value, i):
+				self.mpf.theta.set_value(np.asarray(theta_value, dtype=theano.config.floatX), borrow=True)
+
+				train_losses, train_grads = batch_cost(i, n_train)
+				
+				return train_losses, train_grads
+
+			###############
+			# TRAIN MODEL #
+			###############
+			if param_init == None:
+				theta.set_value(random_theta(D, DH))
+			else:
+				w0, bh0, bv0 = param_init
+				self.mpf.theta.set_value(np.asarray(np.concatenate((w0, bh0, bv0)), dtype=theano.config.floatX))
+
+
+			print 'using sof'
+			sys.path.append('/export/mlrg/ebuchman/Programming/Sum-of-Functions-Optimizer')
+			from sfo import SFO
+			optimizer = SFO(train_fn, self.mpf.theta.get_value(), np.arange(n_batches))
+			start = time.time()
+			theta_opt = optimizer.optimize(num_passes = self.n_epochs)
+			end = time.time()
+
+		
+		self.mpf.theta.set_value(theta_opt.astype(theano.config.floatX), borrow=True)
+		return end-start
 
 def cd_rbm(nv, nh, batch_size, n_epochs, X, params, k):
 	from cd_rbm import test_rbm

@@ -58,14 +58,15 @@ def sample_rbm(weights, bias_h, bias_v, n_samples, burnin=1000, sample_every=100
 	[samples, prop_down], updates = theano.scan(rbm_vhv, outputs_info=[init, None],  non_sequences=[W, bv, bh, nv, nh], n_steps = burnin)
 	init2 = samples[-1]	
 
-	burnt_in = theano.function([W, bv, bh], init2, on_unused_input='ignore', updates=updates)(weights, bias_v, bias_h)
-
+	burn_in_f = theano.function([W, bv, bh], init2, on_unused_input='ignore', updates=updates)
+	burnt_in = burn_in_f(weights, bias_v, bias_h)
 
 	[samples2, prop_down2], updates2 = theano.scan(rbm_vhv, outputs_info=[init2, None ], non_sequences=[W, bv, bh, nv, nh], n_steps = n_samples*sample_every)
 
 	final_samples = samples2[T.arange(0, n_samples*sample_every, sample_every)]	
 
-	return theano.function([W, bv, bh, init2], final_samples, on_unused_input='ignore', updates=updates2)(weights, bias_v, bias_h, burnt_in)
+	return_f = theano.function([W, bv, bh, init2], final_samples, on_unused_input='ignore', updates=updates2)
+	return return_f(weights, bias_v, bias_h, burnt_in)
 
 
 def random_rbm(nv, nh, nsamples, sample_every=10, burnin=100):
