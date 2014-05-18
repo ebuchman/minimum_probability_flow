@@ -1,42 +1,69 @@
 import numpy as np
-import time, pickle, sys
+import time, pickle, sys, math
 import theano
 import theano.tensor as T
 
 from util import load_data, plot_samples
-from rbm import energy, rbm_vhv, sample_rbm, random_rbm, compute_dkl, compute_likelihood
+from rbm import energy, energy2wise, rbm_vhv, sample_rbm, random_rbm, compute_dkl, compute_likelihood
 
-def random_theta(nv, nh):
+def random_theta(nv, nh, k=1):
 	w_bound = np.sqrt(6. / (nv + nh))
 	w0 = np.asarray(np.random.uniform(size=(nv*nh), low=-w_bound, high=w_bound), dtype=theano.config.floatX)
 	bh0 = np.asarray(np.zeros(nv), dtype=theano.config.floatX)
 	bv0 = np.asarray(np.zeros(nh), dtype=theano.config.floatX)
 
+	if k==2:
+		assert(nh%2 == 0)
+		wh = np.asarray(np.random.uniform(size=(nh/2), low=-w_bound, high=w_bound), dtype=theano.config.floatX)
+		return np.asarray(np.concatenate((w0, wh, bh0, bv0)), dtype=theano.config.floatX)
+
 	return np.asarray(np.concatenate((w0, bh0, bv0)), dtype=theano.config.floatX)
 
-def split_theta(theta, nv, nh):
+def split_theta(theta, nv, nh, k=1):
+	params = []
+
 	param_idx = 0
 	w = theta[param_idx:param_idx+nv*nh].reshape(nv, nh)
+	params.append(w)
 	param_idx += nv*nh
 
+	if k == 2:
+		assert (nh % 2 == 0)
+		wh = theta[param_idx:param_idx+nh/2]
+		params.append(wh)
+		param_idx += nh/2
+
 	bh = theta[param_idx:param_idx+nh]
+	params.append(bh)
 	param_idx += nh
 	
 	bv = theta[param_idx:param_idx+nv]
+	params.append(bv)
 	param_idx += nv
 
 #	assert(param_idx == theta_shape)
-	return [w, bh, bv]
+	return params
 
+def nCr(n, r):
+	f = math.factorial
+	return f(n) / f(r) / f(n-r)
 
 class MPF(object):
-	def __init__(self, n_visible, n_hidden):
+	def __init__(self, n_visible, n_hidden, k=1):
 		self.n_visible = n_visible
 		self.n_hidden = n_hidden
+		self.k = k
 
 		D, DH = self.n_visible, self.n_hidden
 
 		theta_shape = D*DH + D + DH
+
+		# accomodate for weights between groups of k hiddens
+		if k == 2:
+			assert (DH % 2 == 0)
+			wh_size = (DH/2)
+			theta_shape += wh_size
+
 		self.theta = theano.shared(value=np.zeros(theta_shape, dtype=theano.config.floatX))
 		self.theta.name = 'theta'
 
@@ -48,6 +75,11 @@ class MPF(object):
 		self.W.name = 'W'
 		param_idx += D*DH
 
+		if k == 2:
+			self.Wh = self.theta[param_idx : param_idx + wh_size]
+			self.Wh.name = 'Wh'
+			param_idx += wh_size
+
 		self.bh = self.theta[param_idx : param_idx + DH]
 		self.bh.name = 'bh'
 		param_idx += DH
@@ -56,6 +88,7 @@ class MPF(object):
 		self.bv.name='bv'
 		param_idx += D
 
+		# add wh ...
 		self.L1 = abs(self.W.sum())
 		self.L2 = (self.W ** 2).sum()
 
@@ -80,34 +113,55 @@ class MPF(object):
 		'''
 		return K
 
+	def rbm_K_2wise(self, X, effective_batch_size):
+		D, DH = self.n_visible, self.n_hidden
+
+		adder = np.zeros((DH/2, DH), dtype=theano.config.floatX)
+		for i in xrange(len(adder)):
+			adder[i, 2*i] = 1
+			adder[i, 2*i+1] = 1
+		adder = theano.shared(adder)
+
+		W, Wh, bh, bv = self.W, self.Wh, self.bh, self.bv
+
+		Y = X.reshape((effective_batch_size, 1, D), 3) * T.ones((1, D, 1)) #tile out data vectors (repeat each one D times)
+		Y = (Y + T.eye(D).reshape((1, D, D), 3))%2 # flip each bit once 
+
+		Z = T.exp(0.5*(energy2wise(X, W, Wh, bh, bv, adder, DH).dimshuffle(0, 'x') - energy2wise(Y, W, Wh, bh, bv, adder, DH)))
+		K = T.sum(Z) / effective_batch_size
+		K.name = 'K'
+		return K
+
 class metaMPF():
-    def __init__(self, nv, nh, batch_size, n_epochs, learning_rate=0.01, learning_rate_decay=1, initial_momentum=0.5, final_momentum=0.9, momentum_switchover=5, L1_reg=0.00, L2_reg=0.00):
-        self.nv = nv
-        self.nh = nh
-        self.batch_size = batch_size
-        self.n_epochs = n_epochs
-        self.learning_rate = learning_rate
-        self.learning_rate_decay = learning_rate_decay
-        self.initial_momentum = initial_momentum
-        self.final_momentum = final_momentum
-        self.momentum_switchover = momentum_switchover
-        self.L1_reg = L1_reg
-        self.L2_reg = L2_reg
+	def __init__(self, nv, nh, batch_size, n_epochs, learning_rate=0.01, learning_rate_decay=1, initial_momentum=0.5, final_momentum=0.9, momentum_switchover=5, L1_reg=0.00, L2_reg=0.00, k=1):
+		self.nv = nv
+		self.nh = nh
+		self.batch_size = batch_size
+		self.n_epochs = n_epochs
+		self.learning_rate = learning_rate
+		self.learning_rate_decay = learning_rate_decay
+		self.initial_momentum = initial_momentum
+		self.final_momentum = final_momentum
+		self.momentum_switchover = momentum_switchover
+		self.L1_reg = L1_reg
+		self.L2_reg = L2_reg
+		self.k = k
 
-        self.ready()
+		self.ready()
 
-    def ready(self):
-        self.X = T.matrix('X')
-        self.mpf = MPF(n_visible = self.nv, n_hidden = self.nh)
+	def ready(self):
+		self.X = T.matrix('X')
+		self.mpf = MPF(n_visible = self.nv, n_hidden = self.nh, k = self.k)
 
-    def shared_dataset(self, data_X, borrow=True):
-        return theano.shared(np.asarray(data_X, dtype=theano.config.floatX))
+	def shared_dataset(self, data_X, borrow=True):
+		return theano.shared(np.asarray(data_X, dtype=theano.config.floatX))
 
-    def fit(self, train_X, optimizer, param_init = None):
+	def fit(self, train_X, optimizer, param_init = None):
 		n_train, n_vis = train_X.shape
 		batch_size = self.batch_size
 
 		#theano.config.profile = True
+		theano.config.exception_verbosity='high'
 
 		assert(n_vis == self.nv)
 
@@ -123,7 +177,12 @@ class metaMPF():
 		lr = T.scalar('lr', dtype=theano.config.floatX)
 		mom = T.scalar('mom', dtype=theano.config.floatX)
 
-		K = self.mpf.rbm_K(self.X, effective_batch_size)
+		if self.k == 1:
+			K = self.mpf.rbm_K(self.X, effective_batch_size)
+		elif self.k == 2:
+			K = self.mpf.rbm_K_2wise(self.X, effective_batch_size)
+		else:
+			raise('NotImplemented')
 		cost = K + self.L1_reg * self.mpf.L1 + self.L2_reg * self.mpf.L2
 
 		grads = T.grad(cost, self.mpf.theta)
@@ -137,8 +196,7 @@ class metaMPF():
 		if param_init == None:
 			self.mpf.theta.set_value(random_theta(D, DH))
 		else:
-			w0, bh0, bv0 = param_init
-			self.mpf.theta.set_value(np.asarray(np.concatenate((w0, bh0, bv0)), dtype=theano.config.floatX))
+			self.mpf.theta.set_value(np.asarray(np.concatenate(param_init), dtype=theano.config.floatX))
 
 		print "actually training ..."
 

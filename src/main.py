@@ -47,12 +47,14 @@ def test_mpf():
 
 def train_mnist():
 	nv, nh = 28*28, 500
-	batch_size = 200
-	n_epochs = 20
+	batch_size = 100
+	n_epochs = 10
 	learning_rate = 0.01
 	decay = 0.99
 	L2_reg = 0.0001
+	L1_reg = 0.0001
 	momi, momf, momsw = 0.5, 0.9, 5
+	k=2
 
 	print 'generating data'
 	f = open('/export/mlrg/ebuchman/datasets/mnist.pkl')
@@ -62,15 +64,15 @@ def train_mnist():
 	X = tr[0]
 	print X.shape
 
-	theta_init = random_theta(nv, nh)
-	param_init = split_theta(theta_init, nv, nh)
+	theta_init = random_theta(nv, nh, k=k)
+	param_init = split_theta(theta_init, nv, nh, k=k)
 
 	param_init[0] = param_init[0].reshape(nv*nh)
 
 	optimizer = 'sgd'
 
 	print 'initializing mpf'
-	model = metaMPF(nv, nh, batch_size, n_epochs, learning_rate=learning_rate, learning_rate_decay=decay, initial_momentum=momi, final_momentum=momf, momentum_switchover=momsw, L1_reg=0.0, L2_reg=L2_reg)
+	model = metaMPF(nv, nh, batch_size, n_epochs, learning_rate=learning_rate, learning_rate_decay=decay, initial_momentum=momi, final_momentum=momf, momentum_switchover=momsw, L1_reg=0.0, L2_reg=L2_reg, k=k)
 	print "training", optimizer
 	start = time.time()
 	model.fit(train_X = X, optimizer = optimizer, param_init = param_init)

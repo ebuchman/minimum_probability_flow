@@ -12,23 +12,23 @@ def energy_np(X, W, bh, bv):
 	return -hidden_term - vbias_term
 
 def energy(X, W, bh, bv):
-	#E = -T.dot(X, bv) - T.log(1 + T.exp( T.dot(X, W) + bh))
+	wx_b = T.dot(X, W) + bh
+	vbias_term = T.dot(X, bv)
+	hidden_term = T.sum(T.log(1 + T.exp(wx_b)), axis=-1)
+	return -hidden_term - vbias_term
 
-	if 1:#X.ndim == 2:
-	#	E = - T.log(1 + T.exp( T.dot(X, W)))
-		#E = - T.dot(X, bv).dimshuffle(0, 'x')  - T.log(1 + T.exp( T.dot(X, W) + bh.dimshuffle('x', 0)))
-		wx_b = T.dot(X, W) + bh
-		vbias_term = T.dot(X, bv)
-		hidden_term = T.sum(T.log(1 + T.exp(wx_b)), axis=-1)
-		return -hidden_term - vbias_term
+def energy2wise(X, W, Wh, bh, bv, adder, nh):
+	wx_b = T.dot(X, W) + bh
+	e_wx_b = T.exp(wx_b)
 
-	elif X.ndim == 3:
-		#E = - T.dot(X, bv).dimshuffle(0, 1, 'x')  - T.log(1 + T.exp( T.dot(X, W) + bh.dimshuffle('x', 'x', 0)))
-		#E = - T.log(1 + T.exp( T.dot(X, W)))
-		wx_b = T.dot(X, W) + bh
+	pairsum = T.dot(e_wx_b, adder.T)
+	first = e_wx_b.T[T.arange(0, nh, 2)].T
+	pairprod = pairsum*first - first**2
 
-	return E.sum(axis = -1)
+	hidden_term = T.sum(T.log(1 + pairsum + pairprod*Wh), axis=-1)
 
+	vbias_term = T.dot(X, bv)
+	return -hidden_term - vbias_term
 
 
 theano_rng = rng_mrg.MRG_RandomStreams(seed=100)
