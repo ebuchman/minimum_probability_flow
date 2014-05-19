@@ -161,7 +161,7 @@ class metaMPF():
 		batch_size = self.batch_size
 
 		#theano.config.profile = True
-		theano.config.exception_verbosity='high'
+		#theano.config.exception_verbosity='high'
 
 		assert(n_vis == self.nv)
 

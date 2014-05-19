@@ -2,9 +2,10 @@ import numpy as np
 import time, pickle, sys
 import theano
 import theano.tensor as T
+import os
 
 from util import load_data, plot_samples
-from rbm import energy, rbm_vhv, sample_rbm, random_rbm, compute_dkl, compute_likelihood
+from rbm import energy, rbm_vhv, sample_rbm, sample_rbm_2wise, random_rbm, compute_dkl, compute_likelihood
 from mpf import *
 
 def test_mpf():
@@ -48,7 +49,7 @@ def test_mpf():
 def train_mnist():
 	nv, nh = 28*28, 500
 	batch_size = 100
-	n_epochs = 10
+	n_epochs = 1
 	learning_rate = 0.01
 	decay = 0.99
 	L2_reg = 0.0001
@@ -61,7 +62,7 @@ def train_mnist():
 	d = pickle.load(f)
 	f.close()
 	tr, val, ts = d
-	X = tr[0]
+	X = tr[0][:1000]
 	print X.shape
 
 	theta_init = random_theta(nv, nh, k=k)
@@ -78,12 +79,30 @@ def train_mnist():
 	model.fit(train_X = X, optimizer = optimizer, param_init = param_init)
 	end = time.time()
 	print 'training time:', end-start
-	W, bh, bv = params_fit = split_theta(model.mpf.theta.get_value(), nv, nh)
 
-	samples = sample_rbm(W, bh, bv, 20, sample_every=1000, burnin=1000)
-	f = open('data/results/mnist_samples_nh%d_ne%d_lr%2f.pkl'%(nh, n_epochs, learning_rate), 'w')
+	params_fit = split_theta(model.mpf.theta.get_value(), nv, nh, k=k)
+
+	if k == 1:
+		w, bh, bv = params_fit
+		samples = sample_rbm(w, bh, bv, 20, sample_every=1000, burnin=1000)
+		save_name = 'mnist_samples_nh%d_ne%d_lr%2f.pkl'%(nh, n_epochs, learning_rate)
+	elif k == 2:
+		w, wh, bh, bv = params_fit
+		samples = sample_rbm_2wise(w, wh, bh, bv, 20, sample_every=1000, burnin=1000)
+		save_name = 'mnist_samples_2wise_nh%d_ne%d_lr%2f.pkl'%(nh, n_epochs, learning_rate)
+
+
+	f = open(os.path.join('data', 'results', save_name), 'w')
 	pickle.dump([samples, params_fit], f)
 	f.close()
+
+def sample_from_params():
+	f = open('data/results/mnist_samples_nh%d_ne%d_lr%2f.pkl'%(nh, n_epochs, learning_rate))
+	samples, params = pickle.load(f)
+	f.close()
+	
+	samples = sample_rbm(params, 20, sample_every=1000, burnin=1000, k=1)
+
 
 
 
@@ -91,3 +110,6 @@ if __name__=='__main__':
 
 	train_mnist()
 	#test_mpf()
+	
+
+
