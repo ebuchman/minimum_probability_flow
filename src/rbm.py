@@ -12,6 +12,26 @@ def energy_np(X, W, bh, bv):
 	hidden_term = np.sum(np.log(1 + np.exp(wx_b)), axis=-1)
 	return -hidden_term - vbias_term
 
+def energy2wise_np(X, W, Wh, bh, bv):
+	nh = len(bh)
+
+	adder = np.zeros((nh/2, nh))
+	for i in xrange(nh/2):
+		adder[i][2*i] = 1
+		adder[i][2*i+1] = 1
+
+	wx_b = np.dot(X, W) + bh
+	e_wx_b = np.exp(wx_b)
+
+	pairsum = np.dot(e_wx_b, adder.T)
+	first = e_wx_b.T[np.arange(0, nh, 2)].T
+	pairprod = pairsum*first - first**2
+
+	hidden_term = np.sum(np.log(1 + pairsum + pairprod*Wh), axis=-1)
+
+	vbias_term = np.dot(X, bv)
+	return -hidden_term - vbias_term
+
 def energy(X, W, bh, bv):
 	wx_b = T.dot(X, W) + bh
 	vbias_term = T.dot(X, bv)
@@ -130,9 +150,9 @@ def sample_rbm_2wise(weights, weights_h, bias_h, bias_v, n_samples, burnin=1000,
 	return return_f(weights, weights_h, bias_v, bias_h, burnt_in)
 
 
-def random_rbm(nv, nh, nsamples, sample_every=10, burnin=100):
+def random_rbm(nv, nh, nsamples, sample_every=10, burnin=100, k=1):
 
-	path = 'data/rbm_samples_%d_%d_%d_%d.pkl'%(nv, nsamples, sample_every, burnin)
+	path = 'data/rbm_samples_nv%d_nsamp%d_sampevery%d_burn%d_k%d.pkl'%(nv, nsamples, sample_every, burnin, k)
 	if os.path.exists(path):
 		f = open(path)
 		samples, params = pickle.load(f)
@@ -145,10 +165,15 @@ def random_rbm(nv, nh, nsamples, sample_every=10, burnin=100):
 	bh0 = np.asarray(np.random.uniform(size=nh, low=-w_bound, high=w_bound), dtype=theano.config.floatX)
 	bv0 = np.asarray(np.random.uniform(size=nv, low=-w_bound, high=w_bound), dtype=theano.config.floatX)
 
-
-	samples = sample_rbm(w0, bh0, bv0, nsamples, sample_every=sample_every, burnin=burnin)
-
-	params = [w0, bh0, bv0]
+	if k == 1:
+		samples = sample_rbm(w0, bh0, bv0, nsamples, sample_every=sample_every, burnin=burnin)
+		params = [w0, bh0, bv0]
+	elif k == 2:
+		assert(nh % 2 == 0)
+		wh = np.asarray(np.random.uniform(size=(nh/2), low=-w_bound, high=w_bound), dtype=theano.config.floatX)
+		samples = sample_rbm_2wise(w0, wh, bh0, bv0, nsamples, sample_every=sample_every, burnin=burnin)
+		params = [w0, wh, bh0, bv0]
+	
 
 	f = open(path, 'w')
 	pickle.dump([samples, params], f)
@@ -176,8 +201,12 @@ def generate_states(nv):
 
 def compute_probs(params, states):
 
-	W, bh, bv = params
-
+	if len(params) == 3:
+		W, bh, bv = params
+		energies = energy_np(states, W, bh, bv)
+	elif len(params) == 4:
+		W, Wh, bh, bv = params
+		energies = energy2wise_np(states, W, Wh, bh, bv)
 
 	energies = energy_np(states, W, bh, bv)
 

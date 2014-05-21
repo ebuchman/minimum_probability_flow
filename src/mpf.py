@@ -88,9 +88,11 @@ class MPF(object):
 		self.bv.name='bv'
 		param_idx += D
 
-		# add wh ...
 		self.L1 = abs(self.W.sum())
 		self.L2 = (self.W ** 2).sum()
+		if k == 2:
+			self.L1 += abs(self.Wh.sum())
+			self.L2 += (self.Wh ** 2).sum()
 
 	def rbm_K(self, X, effective_batch_size):
 		D, DH = self.n_visible, self.n_hidden
@@ -214,13 +216,13 @@ class metaMPF():
 			epoch = 0
 			start = time.time()
 			while epoch < self.n_epochs:
-				print 'epoch:', epoch
+				#print 'epoch:', epoch
 				epoch += 1
 				effective_mom = self.final_momentum if epoch > self.momentum_switchover else self.initial_momentum
 
 				for minibatch_idx in xrange(n_batches):
 					avg_cost = train_model(minibatch_idx, n_train, self.learning_rate, effective_mom)
-					print '\t', minibatch_idx, avg_cost
+					#print '\t', minibatch_idx, avg_cost
 				self.learning_rate *= self.learning_rate_decay
 			theta_opt = self.mpf.theta.get_value()
 			end = time.time()
@@ -311,14 +313,14 @@ def cd_rbm(nv, nh, batch_size, n_epochs, X, params, k):
 	f.close()
 
 
-def train(nv, nh, batch_size, n_epochs, X, optimizer, params, param_init, k=0, lr=0.01, lrd=1, mom_i=0.5, mom_f =0.9, mom_switch=5, L1_reg=0.00, L2_reg=0.00):
+def train(nv, nh, batch_size, n_epochs, X, optimizer, params, param_init, cdk=0, lr=0.01, lrd=1, mom_i=0.5, mom_f =0.9, mom_switch=5, L1_reg=0.00, L2_reg=0.00, k=1):
     if 'cd' in optimizer:
-        cd_rbm(nv, nh, batch_size, n_epochs, X, params, k)
+        cd_rbm(nv, nh, batch_size, n_epochs, X, params, cdk)
     else:
         param_init[0] = param_init[0].reshape(nv*nh)
 
         print 'initializing mpf'
-        model = metaMPF(nv, nh, batch_size, n_epochs, learning_rate=lr, learning_rate_decay=lrd, initial_momentum=mom_i, final_momentum=mom_f, momentum_switchover=mom_switch, L1_reg=L1_reg, L2_reg=L2_reg)
+        model = metaMPF(nv, nh, batch_size, n_epochs, learning_rate=lr, learning_rate_decay=lrd, initial_momentum=mom_i, final_momentum=mom_f, momentum_switchover=mom_switch, L1_reg=L1_reg, L2_reg=L2_reg, k=k)
         print "training", optimizer
         start = time.time()
         t = model.fit(train_X = X, optimizer = optimizer, param_init = param_init)

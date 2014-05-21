@@ -9,35 +9,42 @@ from rbm import energy, rbm_vhv, sample_rbm, sample_rbm_2wise, random_rbm, compu
 from mpf import *
 
 def test_mpf():
-	nv, nh = 10,5
+	nv, nh = 20, 10
 	batch_size = 100
 	n_epochs = 10
 	n_train = 1000
+	k = 2
 
 	seed = np.random.seed(100)
 
 	print 'generating data'
-	samples, params = random_rbm(nv, nh, 1000, sample_every=100, burnin=1000)	
+	samples, params = random_rbm(nv, nh, 1000, sample_every=100, burnin=1000, k=k)	
 	X = samples
 
-	theta_init = random_theta(nv, nh)
-	param_init = split_theta(theta_init, nv, nh)
+	theta_init = random_theta(nv, nh, k=k)
+	param_init = split_theta(theta_init, nv, nh, k=k)
 
 	# compute dkl and likelihood before training
-	L_rand = compute_likelihood(param_init, X)
+	L_rand = compute_likelihood(param_init, X) # infer k from length of param_init
 	dkl_rand = compute_dkl(params, param_init)
 
 	print 'init dkl', dkl_rand
 	print 'init nll', -L_rand
 	print ''
-
-	train(nv, nh, batch_size, 5, X, 'bfgs', params, param_init)
-	train(nv, nh, batch_size, 2, X, 'sgd', params, param_init, lr=0.01, lrd=1, mom_i=0.5, mom_f =0.9, mom_switch=5, L1_reg=0.00, L2_reg=0.00)
+	
+	print "k2 bfgs ################################"
+	train(nv, nh, batch_size, 5, X, 'bfgs', params, param_init, k=k)
+	print "k1 bfgs ################################"
+	train(nv, nh, batch_size, 5, X, 'bfgs', params, param_init, k=1)
+	print "k2 sgd ################################"
+	train(nv, nh, batch_size, 10, X, 'sgd', params, param_init, lr=0.01, lrd=1, mom_i=0.5, mom_f =0.9, mom_switch=5, L1_reg=0.00, L2_reg=0.00, k=k)
+	print "k1 sgd ################################"
+	train(nv, nh, batch_size, 10, X, 'sgd', params, param_init, lr=0.01, lrd=1, mom_i=0.5, mom_f =0.9, mom_switch=5, L1_reg=0.00, L2_reg=0.00, k=1)
 	quit()
-	train(nv, nh, batch_size, 10, X, 'cd', params, param_init, k=1)
-	train(nv, nh, batch_size, 100, X, 'cd', params, param_init, k=1)
-	train(nv, nh, batch_size, 10, X, 'cd', params, param_init, k=10)
-	train(nv, nh, batch_size, 100, X, 'cd', params, param_init, k=10)
+	train(nv, nh, batch_size, 10, X, 'cd', params, param_init, cdk=1)
+	train(nv, nh, batch_size, 100, X, 'cd', params, param_init, cdk=1)
+	train(nv, nh, batch_size, 10, X, 'cd', params, param_init, cdk=10)
+	train(nv, nh, batch_size, 100, X, 'cd', params, param_init, cdk=10)
 	train(nv, nh, batch_size, 5, X, 'bfgs', params, param_init)
 	train(nv, nh, batch_size, 10, X, 'bfgs', params, param_init)
 	train(nv, nh, batch_size, 20, X, 'bfgs', params, param_init)
@@ -49,12 +56,12 @@ def test_mpf():
 def train_mnist():
 	nv, nh = 28*28, 500
 	batch_size = 100
-	n_epochs = 1
+	n_epochs = 5
 	learning_rate = 0.01
 	decay = 0.99
-	L2_reg = 0.0001
+	L2_reg = 0.001
 	L1_reg = 0.0001
-	momi, momf, momsw = 0.5, 0.9, 5
+	momi, momf, momsw = 0.5, 0.9, 10
 	k=2
 
 	print 'generating data'
@@ -62,7 +69,7 @@ def train_mnist():
 	d = pickle.load(f)
 	f.close()
 	tr, val, ts = d
-	X = tr[0][:1000]
+	X = tr[0]
 	print X.shape
 
 	theta_init = random_theta(nv, nh, k=k)
@@ -108,8 +115,8 @@ def sample_from_params():
 
 if __name__=='__main__':
 
-	train_mnist()
-	#test_mpf()
+	#train_mnist()
+	test_mpf()
 	
 
 
