@@ -208,8 +208,6 @@ def compute_probs(params, states):
 		W, Wh, bh, bv = params
 		energies = energy2wise_np(states, W, Wh, bh, bv)
 
-	energies = energy_np(states, W, bh, bv)
-
 	ps = np.exp(-energies)
 	Z = ps.sum()
 
