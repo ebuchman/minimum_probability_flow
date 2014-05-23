@@ -8,6 +8,20 @@ from util import load_data, plot_samples
 from rbm import energy, rbm_vhv, sample_rbm, sample_rbm_2wise, random_rbm, compute_dkl, compute_likelihood
 from mpf import *
 
+def load_params(nv, nh, k, n_epochs, learning_rate):
+	if k == 1:
+		path = 'mnist_samples_nh%d_ne%d_lr%2f.pkl'%(nh, n_epochs, learning_rate)
+	elif k == 2:
+		path = 'mnist_samples_2wise_nh%d_ne%d_lr%2f.pkl'%(nh, n_epochs, learning_rate)
+
+	f = open(os.path.join('data', 'results', path))
+	samples, params = pickle.load(f)
+	f.close()
+
+	params[0] = params[0].reshape(nv*nh)
+
+	return params
+
 def test_mpf():
     nv, nh = 20, 16
     batch_size = 100
@@ -59,28 +73,37 @@ def test_mpf():
 
 
 def train_mnist():
-	nv, nh = 28*28, 500
+	nv, nh = 14*14, 500
 	batch_size = 100
-	n_epochs = 5
-	learning_rate = 0.01
+	n_epochs = 100
+	learning_rate = 0.001
 	decay = 0.99
 	L2_reg = 0.001
-	L1_reg = 0.0001
+	L1_reg = 0.001
+	#momi, momf, momsw = 0.5, 0.9, 10
 	momi, momf, momsw = 0.5, 0.9, 10
 	k=2
+	sample_every = 10
+
+	LOAD_PARAMS = False
 
 	print 'generating data'
-	f = open('/export/mlrg/ebuchman/datasets/mnist.pkl')
+	f = open('/export/mlrg/ebuchman/datasets/mnistX_binary_lowres.pkl')
 	d = pickle.load(f)
 	f.close()
-	tr, val, ts = d
-	X = tr[0]
+	if len(d) == 3:
+		tr, val, ts = d
+		X = tr[0]
+	else:
+		X = d
 	print X.shape
 
-	theta_init = random_theta(nv, nh, k=k)
-	param_init = split_theta(theta_init, nv, nh, k=k)
-
-	param_init[0] = param_init[0].reshape(nv*nh)
+	if LOAD_PARAMS:
+		param_init = load_params(nv, nh, k, 10, learning_rate)
+	else:
+		theta_init = random_theta(nv, nh, k=k)
+		param_init = split_theta(theta_init, nv, nh, k=k)
+		param_init[0] = param_init[0].reshape(nv*nh)
 
 	optimizer = 'sgd'
 
@@ -88,25 +111,11 @@ def train_mnist():
 	model = metaMPF(nv, nh, batch_size, n_epochs, learning_rate=learning_rate, learning_rate_decay=decay, initial_momentum=momi, final_momentum=momf, momentum_switchover=momsw, L1_reg=0.0, L2_reg=L2_reg, k=k)
 	print "training", optimizer
 	start = time.time()
-	model.fit(train_X = X, optimizer = optimizer, param_init = param_init)
+	model.fit(train_X = X, optimizer = optimizer, param_init = param_init, sample_every=sample_every)
 	end = time.time()
 	print 'training time:', end-start
 
-	params_fit = split_theta(model.mpf.theta.get_value(), nv, nh, k=k)
-
-	if k == 1:
-		w, bh, bv = params_fit
-		samples = sample_rbm(w, bh, bv, 20, sample_every=1000, burnin=1000)
-		save_name = 'mnist_samples_nh%d_ne%d_lr%2f.pkl'%(nh, n_epochs, learning_rate)
-	elif k == 2:
-		w, wh, bh, bv = params_fit
-		samples = sample_rbm_2wise(w, wh, bh, bv, 20, sample_every=1000, burnin=1000)
-		save_name = 'mnist_samples_2wise_nh%d_ne%d_lr%2f.pkl'%(nh, n_epochs, learning_rate)
-
-
-	f = open(os.path.join('data', 'results', save_name), 'w')
-	pickle.dump([samples, params_fit], f)
-	f.close()
+	#params_fit = split_theta(model.mpf.theta.get_value(), nv, nh, k=k)
 
 def sample_from_params():
 	f = open('data/results/mnist_samples_nh%d_ne%d_lr%2f.pkl'%(nh, n_epochs, learning_rate))
@@ -120,8 +129,8 @@ def sample_from_params():
 
 if __name__=='__main__':
 
-	#train_mnist()
-	test_mpf()
+	train_mnist()
+	#test_mpf()
 	
 
 

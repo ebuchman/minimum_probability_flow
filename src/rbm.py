@@ -27,7 +27,7 @@ def energy2wise_np(X, W, Wh, bh, bv):
 	first = e_wx_b.T[np.arange(0, nh, 2)].T
 	pairprod = pairsum*first - first**2
 
-	hidden_term = np.sum(np.log(1 + pairsum + pairprod*Wh), axis=-1)
+	hidden_term = np.sum(np.log(1 + pairsum + pairprod*np.exp(Wh)), axis=-1)
 
 	vbias_term = np.dot(X, bv)
 	return -hidden_term - vbias_term
@@ -46,10 +46,31 @@ def energy2wise(X, W, Wh, bh, bv, adder, nh):
 	first = e_wx_b.T[T.arange(0, nh, 2)].T
 	pairprod = pairsum*first - first**2
 
-	hidden_term = T.sum(T.log(1 + pairsum + pairprod*Wh), axis=-1)
+	hidden_term = T.sum(T.log(1 + pairsum + pairprod*T.exp(Wh)), axis=-1)
 
 	vbias_term = T.dot(X, bv)
 	return -hidden_term - vbias_term
+
+
+def debug_energy2wise(X, W, Wh, bh, bv, adder, nh):
+	wx_b = T.dot(X, W) + bh
+	e_wx_b = T.exp(wx_b)
+
+	pairsum = T.dot(e_wx_b, adder.T)
+	first = e_wx_b.T[T.arange(0, nh, 2)].T
+	pairprod = pairsum*first - first**2
+
+	pairprodWh = pairprod*T.exp(Wh)
+
+	logterm = T.log(1 + pairsum + pairprodWh)
+
+	hidden_term = T.sum(logterm, axis=-1)
+
+	vbias_term = T.dot(X, bv)
+
+	energy =  -hidden_term - vbias_term
+
+	return wx_b, e_wx_b, pairsum, first, pairprod, pairprodWh, logterm, hidden_term, vbias_term, energy
 
 
 theano_rng = rng_mrg.MRG_RandomStreams(seed=100)
@@ -77,15 +98,14 @@ def rbm_vhv_2wise(v, W, Wh, bv, bh, nv, nh, adder):
 	pairsum = T.dot(ephi, adder.T)
 	first = ephi.T[T.arange(0, nh, 2)].T
 	pairprod = pairsum*first - first**2
+	pairterm = pairprod*T.exp(Wh)
 
-	wobble = 1 + pairsum + pairprod*Wh
-	
-	pairterm = T.exp(pairsum + Wh)
+	wobble = 1 + pairsum + pairterm
 
 	pairterm_broadcast = kron(pairterm.dimshuffle(0, 'x'), T.ones(2))
 	wobble_broadcast = kron(wobble.dimshuffle(0, 'x'), T.ones(2))
 
-	prop_up = T.exp(phi + pairterm_broadcast) / wobble_broadcast
+	prop_up = (ephi + pairterm_broadcast) / wobble_broadcast
 
 	h = theano_rng.binomial(n=1, p = prop_up, dtype=theano.config.floatX, size=(nh,), ndim=1)
 	prop_down = T.nnet.sigmoid(T.dot(W, h) + bv)
