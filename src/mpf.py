@@ -137,18 +137,12 @@ class MPF(object):
 	def rbm_K_2wise(self, X, effective_batch_size):
 		D, DH = self.n_visible, self.n_hidden
 
-		adder = np.zeros((DH/2, DH), dtype=theano.config.floatX)
-		for i in xrange(len(adder)):
-			adder[i, 2*i] = 1
-			adder[i, 2*i+1] = 1
-		adder = theano.shared(adder)
-
 		W, Wh, bh, bv = self.W, self.Wh, self.bh, self.bv
 
 		Y = X.reshape((effective_batch_size, 1, D), 3) * T.ones((1, D, 1)) #tile out data vectors (repeat each one D times)
 		Y = (Y + T.eye(D).reshape((1, D, D), 3))%2 # flip each bit once 
 
-		Z = T.exp(0.5*(energy2wise(X, W, Wh, bh, bv, adder, DH).dimshuffle(0, 'x') - energy2wise(Y, W, Wh, bh, bv, adder, DH)))
+		Z = T.exp(0.5*(energy2wise(X, W, Wh, bh, bv, DH).dimshuffle(0, 'x') - energy2wise(Y, W, Wh, bh, bv, DH)))
 		K = T.sum(Z) / effective_batch_size
 		K.name = 'K'
 		return K
@@ -156,19 +150,13 @@ class MPF(object):
 	def debug_rbm_K_2wise(self, X, effective_batch_size):
 		D, DH = self.n_visible, self.n_hidden
 
-		adder = np.zeros((DH/2, DH), dtype=theano.config.floatX)
-		for i in xrange(len(adder)):
-			adder[i, 2*i] = 1
-			adder[i, 2*i+1] = 1
-		adder = theano.shared(adder)
-
 		W, Wh, bh, bv = self.W, self.Wh, self.bh, self.bv
 
 		Y = X.reshape((effective_batch_size, 1, D), 3) * T.ones((1, D, 1)) #tile out data vectors (repeat each one D times)
 		Y1 = (Y + T.eye(D).reshape((1, D, D), 3))%2 # flip each bit once 
 
-		wx_b1, e_wx_b1, pairsum1, first1, pairprod1, pairprodWh1, logterm1, hidden_term1, vbias_term1, energy1 = debug_energy2wise(X, W, Wh, bh, bv, adder, DH)
-		wx_b2, e_wx_b2, pairsum2, first2, pairprod2, pairprodWh2, logterm2, hidden_term2, vbias_term2, energy2 = debug_energy2wise(Y1, W, Wh, bh, bv, adder, DH)
+		wx_b1, e_wx_b1, pairsum1, first1, pairprod1, pairprodWh1, logterm1, hidden_term1, vbias_term1, energy1 = debug_energy2wise(X, W, Wh, bh, bv, DH)
+		wx_b2, e_wx_b2, pairsum2, first2, pairprod2, pairprodWh2, logterm2, hidden_term2, vbias_term2, energy2 = debug_energy2wise(Y1, W, Wh, bh, bv, DH)
 
 		Z = T.exp(0.5*(energy1.dimshuffle(0, 'x') - energy2))
 		K = T.sum(Z) / effective_batch_size
@@ -207,7 +195,7 @@ class metaMPF():
 		batch_size = self.batch_size
 
 		if sample_every == None:
-			sample_every = self.n_epochs
+			sample_every = 10000000
 		#theano.config.profile = True
 		#theano.config.exception_verbosity='high'
 

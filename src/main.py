@@ -5,7 +5,7 @@ import theano.tensor as T
 import os
 
 from util import load_data, plot_samples
-from rbm import energy, rbm_vhv, sample_rbm, sample_rbm_2wise, random_rbm, compute_dkl, compute_likelihood
+from rbm import energy, rbm_vhv, sample_h_given_v_np, sample_v_given_h_np, sample_h_given_v_2wise_np, sample_rbm, sample_rbm_2wise, random_rbm, compute_dkl, compute_likelihood
 from mpf import *
 
 def load_params(nv, nh, k, n_epochs, learning_rate):
@@ -25,7 +25,7 @@ def load_params(nv, nh, k, n_epochs, learning_rate):
 def test_mpf():
     nv, nh = 20, 16
     batch_size = 100
-    n_epochs = 10
+    n_epochs = 1
     n_train = 1000
     k = 2
 
@@ -71,18 +71,27 @@ def test_mpf():
     train(nv, nh, batch_size, 10, X, 'sof', params, param_init)
     train(nv, nh, batch_size, 20, X, 'sof', params, param_init)
 
+def _train(X, optimizer, param_init, nv, nh, batch_size, n_epochs, learning_rate, decay, momi, momf, momsw, L1_reg, L2_reg, k, sample_every=None):
+	print 'initializing mpf'
+	model = metaMPF(nv, nh, batch_size, n_epochs, learning_rate=learning_rate, learning_rate_decay=decay, initial_momentum=momi, final_momentum=momf, momentum_switchover=momsw, L1_reg=0.0, L2_reg=L2_reg, k=k)
+	print "training", optimizer
+	start = time.time()
+	model.fit(train_X = X, optimizer = optimizer, param_init = param_init, sample_every=sample_every)
+	end = time.time()
+	print 'training time:', end-start
+	return split_theta(model.mpf.theta.get_value(), nv, nh, k=k)
 
 def train_mnist():
 	nv, nh = 14*14, 500
 	batch_size = 100
-	n_epochs = 100
+	n_epochs = 30
 	learning_rate = 0.001
 	decay = 0.99
 	L2_reg = 0.001
 	L1_reg = 0.001
 	#momi, momf, momsw = 0.5, 0.9, 10
 	momi, momf, momsw = 0.5, 0.9, 10
-	k=2
+	k=1
 	sample_every = 10
 
 	LOAD_PARAMS = False
@@ -107,15 +116,46 @@ def train_mnist():
 
 	optimizer = 'sgd'
 
-	print 'initializing mpf'
-	model = metaMPF(nv, nh, batch_size, n_epochs, learning_rate=learning_rate, learning_rate_decay=decay, initial_momentum=momi, final_momentum=momf, momentum_switchover=momsw, L1_reg=0.0, L2_reg=L2_reg, k=k)
-	print "training", optimizer
-	start = time.time()
-	model.fit(train_X = X, optimizer = optimizer, param_init = param_init, sample_every=sample_every)
-	end = time.time()
-	print 'training time:', end-start
+	param_first_layer = _train(X, optimizer, param_init, nv, nh, batch_size, n_epochs, learning_rate, decay, momi, momf, momsw, L1_reg, L2_reg, k)
+
+	if k == 1:
+		W, bh, bv = param_first_layer
+		X2 = sample_h_given_v_np(X, W, bh, nh)
+	elif k == 2:
+		W, Wh, bh, bv = param_first_layer
+		X2 = sample_h_given_v_2wise_np(X, W, Wh, bh, nh)
+
+	print X2.shape
+
+	theta_init = random_theta(nh, nh, k=k)
+	param_init = split_theta(theta_init, nh, nh, k=k)
+	param_init[0] = param_init[0].reshape(nh*nh)
+
+	param_second_layer = _train(X2, optimizer, param_init, nh, nh, batch_size, n_epochs, learning_rate, decay, momi, momf, momsw, L1_reg, L2_reg, k)
 
 	#params_fit = split_theta(model.mpf.theta.get_value(), nv, nh, k=k)
+	deep_samples([param_first_layer, param_second_layer], 50)
+
+def deep_samples(params, nsamps, sample_every=1000, burnin=1000):
+	layers = len(params)
+
+	path = 'mnist_deep_samples_'
+
+
+	w, bh, bv = params[-1]
+	path += 'nh%d_'%len(bh)
+	next_samples = sample_rbm(w, bh, bv, nsamps, sample_every=sample_every, burnin=burnin)
+	for i in xrange(layers-1):
+		w, bh, bv = params[-2-i]
+		path += 'nh%d_'%len(bh)
+		next_samples = sample_v_given_h_np(next_samples, w, bv, len(bv))
+
+	path += '.pkl'
+
+	f = open(os.path.join('data', 'results', path), 'w')
+	pickle.dump([next_samples, params], f)
+	f.close()
+
 
 def sample_from_params():
 	f = open('data/results/mnist_samples_nh%d_ne%d_lr%2f.pkl'%(nh, n_epochs, learning_rate))

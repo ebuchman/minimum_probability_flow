@@ -38,10 +38,15 @@ def energy(X, W, bh, bv):
 	hidden_term = T.sum(T.log(1 + T.exp(wx_b)), axis=-1)
 	return -hidden_term - vbias_term
 
-def energy2wise(X, W, Wh, bh, bv, adder, nh):
+def energy2wise(X, W, Wh, bh, bv, nh):
 	wx_b = T.dot(X, W) + bh
 	e_wx_b = T.exp(wx_b)
 
+	adder = np.zeros((nh/2, nh), dtype=theano.config.floatX)
+	for i in xrange(len(adder)):
+		adder[i, 2*i] = 1
+		adder[i, 2*i+1] = 1
+	adder = theano.shared(adder)
 	pairsum = T.dot(e_wx_b, adder.T)
 	first = e_wx_b.T[T.arange(0, nh, 2)].T
 	pairprod = pairsum*first - first**2
@@ -52,10 +57,15 @@ def energy2wise(X, W, Wh, bh, bv, adder, nh):
 	return -hidden_term - vbias_term
 
 
-def debug_energy2wise(X, W, Wh, bh, bv, adder, nh):
+def debug_energy2wise(X, W, Wh, bh, bv, nh):
 	wx_b = T.dot(X, W) + bh
 	e_wx_b = T.exp(wx_b)
 
+	adder = np.zeros((nh/2, nh), dtype=theano.config.floatX)
+	for i in xrange(len(adder)):
+		adder[i, 2*i] = 1
+		adder[i, 2*i+1] = 1
+	adder = theano.shared(adder)
 	pairsum = T.dot(e_wx_b, adder.T)
 	first = e_wx_b.T[T.arange(0, nh, 2)].T
 	pairprod = pairsum*first - first**2
@@ -76,19 +86,63 @@ def debug_energy2wise(X, W, Wh, bh, bv, adder, nh):
 theano_rng = rng_mrg.MRG_RandomStreams(seed=100)
 #theano_rng = RandomStreams(100)
 
+def sample_v_given_h_np(h, W, bv, nv):
+	prop_down = 1./(1+np.exp(-(np.dot(h, W.T) + bv)))
+	v = np.random.binomial(n=1, p = prop_down, size=(h.shape[0], nv))
+	return v
 
-def rbm_vhv(v, W, bv, bh, nv, nh):
+def sample_h_given_v_np(v, W, bh, nh):
+	prop_up = 1./(1+np.exp(-(np.dot(v, W) + bh)))
+	h = np.random.binomial(n=1, p = prop_up, size=(v.shape[0], nh))
+	return h
+
+def sample_h_given_v(v, W, bh, nh):
 	prop_up = T.nnet.sigmoid(T.dot(v, W) + bh)
 	h = theano_rng.binomial(n=1, p = prop_up, dtype=theano.config.floatX, size=(nh,), ndim=1)
+	return h
+
+def rbm_vhv(v, W, bv, bh, nv, nh):
+	h = sample_h_given_v(v, W, bh, nh)
 	prop_down = T.nnet.sigmoid(T.dot(W, h) + bv)
 	v = theano_rng.binomial(n=1, p = prop_down, dtype=theano.config.floatX, size=(nv,), ndim=1)
 
 	return v, prop_down
-	
-def rbm_vhv_2wise(v, W, Wh, bv, bh, nv, nh, adder):
+
+def sample_h_given_v_2wise_np(v, W, Wh, bh, nh):
+	phi = np.dot(v, W) + bh
+	ephi = np.exp(phi)
+
+	adder = np.zeros((nh/2, nh))
+	for i in xrange(len(adder)):
+		adder[i, 2*i] = 1
+		adder[i, 2*i+1] = 1
+
+	pairsum = np.dot(ephi, adder.T)
+	first = ephi.T[np.arange(0, nh, 2)].T
+	pairprod = pairsum*first - first**2
+	pairterm = pairprod*np.exp(Wh)
+
+	wobble = 1 + pairsum + pairterm
+
+	pairterm_broadcast = np.kron(pairterm.reshape(nh/2, 1), np.ones(2))
+	wobble_broadcast = np.kron(wobble.reshape(nh/2, 1), np.ones(2))
+
+	prop_up = (ephi + pairterm_broadcast) / wobble_broadcast
+
+	h = np.random.binomial(n=1, p = prop_up, size=(v.shape[0], nh))
+
+	return h
+
+
+def sample_h_given_v_2wise(v, W, Wh, bh, nh):
 	phi = T.dot(v, W) + bh
 	ephi = T.exp(phi)
 
+	adder = np.zeros((nh/2, nh), dtype=theano.config.floatX)
+	for i in xrange(len(adder)):
+		adder[i, 2*i] = 1
+		adder[i, 2*i+1] = 1
+	adder = theano.shared(adder)
 	# wobble =  1 + exp(phi_2i) + exp(phi_{2i+1}) + exp(phi_2i + phi_{21+1} + Wh_i)
 	# p(h_2i = 1 | v) = (exp(phi_2i) + exp(phi_2i + phi_{21+1} + Wh_i ) / wobble
 	# p(h_{2i+1} = 1 | v) = (exp(phi_2i) + exp(phi_2i + phi_{2i+1} + Wh_i )) / wobble
@@ -108,6 +162,71 @@ def rbm_vhv_2wise(v, W, Wh, bv, bh, nv, nh, adder):
 	prop_up = (ephi + pairterm_broadcast) / wobble_broadcast
 
 	h = theano_rng.binomial(n=1, p = prop_up, dtype=theano.config.floatX, size=(nh,), ndim=1)
+
+	return h
+def sample_h_given_v_2wise(v, W, Wh, bh, nh):
+	phi = T.dot(v, W) + bh
+	ephi = T.exp(phi)
+
+	adder = np.zeros((nh/2, nh), dtype=theano.config.floatX)
+	for i in xrange(len(adder)):
+		adder[i, 2*i] = 1
+		adder[i, 2*i+1] = 1
+	adder = theano.shared(adder)
+	# wobble =  1 + exp(phi_2i) + exp(phi_{2i+1}) + exp(phi_2i + phi_{21+1} + Wh_i)
+	# p(h_2i = 1 | v) = (exp(phi_2i) + exp(phi_2i + phi_{21+1} + Wh_i ) / wobble
+	# p(h_{2i+1} = 1 | v) = (exp(phi_2i) + exp(phi_2i + phi_{2i+1} + Wh_i )) / wobble
+	# the second term is the same in both - the pair term.  but it must be broadcasted (the kron!)
+	# dotting by adder returns a vector of half the size of sums of pairs of elements
+
+	pairsum = T.dot(ephi, adder.T)
+	first = ephi.T[T.arange(0, nh, 2)].T
+	pairprod = pairsum*first - first**2
+	pairterm = pairprod*T.exp(Wh)
+
+	wobble = 1 + pairsum + pairterm
+
+	pairterm_broadcast = kron(pairterm.dimshuffle(0, 'x'), T.ones(2))
+	wobble_broadcast = kron(wobble.dimshuffle(0, 'x'), T.ones(2))
+
+	prop_up = (ephi + pairterm_broadcast) / wobble_broadcast
+
+	h = theano_rng.binomial(n=1, p = prop_up, dtype=theano.config.floatX, size=(nh,), ndim=1)
+
+	return h
+def sample_h_given_v_2wise(v, W, Wh, bh, nh):
+	phi = T.dot(v, W) + bh
+	ephi = T.exp(phi)
+
+	adder = np.zeros((nh/2, nh), dtype=theano.config.floatX)
+	for i in xrange(len(adder)):
+		adder[i, 2*i] = 1
+		adder[i, 2*i+1] = 1
+	adder = theano.shared(adder)
+	# wobble =  1 + exp(phi_2i) + exp(phi_{2i+1}) + exp(phi_2i + phi_{21+1} + Wh_i)
+	# p(h_2i = 1 | v) = (exp(phi_2i) + exp(phi_2i + phi_{21+1} + Wh_i ) / wobble
+	# p(h_{2i+1} = 1 | v) = (exp(phi_2i) + exp(phi_2i + phi_{2i+1} + Wh_i )) / wobble
+	# the second term is the same in both - the pair term.  but it must be broadcasted (the kron!)
+	# dotting by adder returns a vector of half the size of sums of pairs of elements
+
+	pairsum = T.dot(ephi, adder.T)
+	first = ephi.T[T.arange(0, nh, 2)].T
+	pairprod = pairsum*first - first**2
+	pairterm = pairprod*T.exp(Wh)
+
+	wobble = 1 + pairsum + pairterm
+
+	pairterm_broadcast = kron(pairterm.dimshuffle(0, 'x'), T.ones(2))
+	wobble_broadcast = kron(wobble.dimshuffle(0, 'x'), T.ones(2))
+
+	prop_up = (ephi + pairterm_broadcast) / wobble_broadcast
+
+	h = theano_rng.binomial(n=1, p = prop_up, dtype=theano.config.floatX, size=(nh,), ndim=1)
+
+	return h
+	
+def rbm_vhv_2wise(v, W, Wh, bv, bh, nv, nh):
+	h = sample_h_given_v_2wise(v, W, Wh, bh, nh)
 	prop_down = T.nnet.sigmoid(T.dot(W, h) + bv)
 	v = theano_rng.binomial(n=1, p = prop_down, dtype=theano.config.floatX, size=(nv,), ndim=1)
 
@@ -148,21 +267,15 @@ def sample_rbm_2wise(weights, weights_h, bias_h, bias_v, n_samples, burnin=1000,
 
 	nv, nh = weights.shape
 
-	adder = np.zeros((int(nh/2), nh), dtype=theano.config.floatX)
-	for i in xrange(len(adder)):
-		adder[i, 2*i] = 1
-		adder[i, 2*i+1] = 1
-	adder = theano.shared(adder)
-
 	init = theano_rng.binomial(p=0.5, size=(nv,), ndim=1, dtype=theano.config.floatX)
 
-	[samples, prop_down], updates = theano.scan(rbm_vhv_2wise, outputs_info=[init, None],  non_sequences=[W, Wh, bv, bh, nv, nh, adder], n_steps = burnin)
+	[samples, prop_down], updates = theano.scan(rbm_vhv_2wise, outputs_info=[init, None],  non_sequences=[W, Wh, bv, bh, nv, nh], n_steps = burnin)
 	init2 = samples[-1]	
 
 	burn_in_f = theano.function([W, Wh, bv, bh], init2, on_unused_input='ignore', updates=updates)
 	burnt_in = burn_in_f(weights, weights_h, bias_v, bias_h)
 
-	[samples2, prop_down2], updates2 = theano.scan(rbm_vhv_2wise, outputs_info=[init2, None ], non_sequences=[W, Wh, bv, bh, nv, nh, adder], n_steps = n_samples*sample_every)
+	[samples2, prop_down2], updates2 = theano.scan(rbm_vhv_2wise, outputs_info=[init2, None ], non_sequences=[W, Wh, bv, bh, nv, nh], n_steps = n_samples*sample_every)
 
 	final_samples = samples2[T.arange(0, n_samples*sample_every, sample_every)]	
 

@@ -75,4 +75,4 @@ def load_params_generate_samples():
 
 if __name__ == '__main__':
     load_params_generate_samples()
-    load_samples_and_params()
+    #load_samples_and_params()
