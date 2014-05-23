@@ -13,8 +13,8 @@ DEBUG = 0
 def random_theta(nv, nh, k=1):
 	w_bound = np.sqrt(6. / (nv + nh))
 	w0 = np.asarray(np.random.uniform(size=(nv*nh), low=-w_bound, high=w_bound), dtype=theano.config.floatX)
-	bh0 = np.asarray(np.zeros(nv), dtype=theano.config.floatX)
-	bv0 = np.asarray(np.zeros(nh), dtype=theano.config.floatX)
+	bh0 = np.asarray(np.zeros(nh), dtype=theano.config.floatX)
+	bv0 = np.asarray(np.zeros(nv), dtype=theano.config.floatX)
 
 	if k==2:
 		assert(nh%2 == 0)
@@ -76,7 +76,6 @@ class MPF(object):
 		D, DH = self.n_visible, self.n_hidden
 
 		theta_shape = D*DH + D + DH
-
 		# accomodate for weights between groups of k hiddens
 		if k == 2:
 			assert (DH % 2 == 0)

@@ -86,6 +86,16 @@ def debug_energy2wise(X, W, Wh, bh, bv, nh):
 theano_rng = rng_mrg.MRG_RandomStreams(seed=100)
 #theano_rng = RandomStreams(100)
 
+def rbm_vhv_np(v, W, bh, bv):
+    h = sample_h_given_v_np(v, W, bh, len(bh))
+    v = sample_v_given_h_np(h, W, bv, len(bv))
+    return v
+
+def rbm_vhv_2wise_np(v, W, Wh, bh, bv):
+    h = sample_h_given_v_2wise_np(v, W, Wh, bh, len(bh))
+    v = sample_v_given_h_np(h, W, bv, len(bv))
+    return v
+
 def sample_v_given_h_np(h, W, bv, nv):
 	prop_down = 1./(1+np.exp(-(np.dot(h, W.T) + bv)))
 	v = np.random.binomial(n=1, p = prop_down, size=(h.shape[0], nv))
@@ -109,29 +119,29 @@ def rbm_vhv(v, W, bv, bh, nv, nh):
 	return v, prop_down
 
 def sample_h_given_v_2wise_np(v, W, Wh, bh, nh):
-	phi = np.dot(v, W) + bh
-	ephi = np.exp(phi)
+    phi = np.dot(v, W) + bh
+    ephi = np.exp(phi)
 
-	adder = np.zeros((nh/2, nh))
-	for i in xrange(len(adder)):
-		adder[i, 2*i] = 1
-		adder[i, 2*i+1] = 1
+    adder = np.zeros((nh/2, nh))
+    for i in xrange(len(adder)):
+        adder[i, 2*i] = 1
+        adder[i, 2*i+1] = 1
 
-	pairsum = np.dot(ephi, adder.T)
-	first = ephi.T[np.arange(0, nh, 2)].T
-	pairprod = pairsum*first - first**2
-	pairterm = pairprod*np.exp(Wh)
+    pairsum = np.dot(ephi, adder.T)
+    first = ephi.T[np.arange(0, nh, 2)].T
+    pairprod = pairsum*first - first**2
+    pairterm = pairprod*np.exp(Wh)
 
-	wobble = 1 + pairsum + pairterm
+    wobble = 1 + pairsum + pairterm
 
-	pairterm_broadcast = np.kron(pairterm.reshape(nh/2, 1), np.ones(2))
-	wobble_broadcast = np.kron(wobble.reshape(nh/2, 1), np.ones(2))
+    pairterm_broadcast = np.kron(pairterm, np.ones(2))
+    wobble_broadcast = np.kron(wobble, np.ones(2))
 
-	prop_up = (ephi + pairterm_broadcast) / wobble_broadcast
+    prop_up = (ephi + pairterm_broadcast) / wobble_broadcast
 
-	h = np.random.binomial(n=1, p = prop_up, size=(v.shape[0], nh))
+    h = np.random.binomial(n=1, p = prop_up, size=(v.shape[0], nh))
 
-	return h
+    return h
 
 
 def sample_h_given_v_2wise(v, W, Wh, bh, nh):
