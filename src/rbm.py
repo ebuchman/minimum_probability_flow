@@ -96,15 +96,19 @@ def rbm_vhv_2wise_np(v, W, Wh, bh, bv):
     v = sample_v_given_h_np(h, W, bv, len(bv))
     return v
 
-def sample_v_given_h_np(h, W, bv, nv):
-	prop_down = 1./(1+np.exp(-(np.dot(h, W.T) + bv)))
-	v = np.random.binomial(n=1, p = prop_down, size=(h.shape[0], nv))
-	return v
+def sample_v_given_h_np(h, W, bv, nv, mean=False):
+    prop_down = 1./(1+np.exp(-(np.dot(h, W.T) + bv)))
+    if mean:
+        return prop_down
+    else:
+        return np.random.binomial(n=1, p = prop_down, size=(h.shape[0], nv))
 
-def sample_h_given_v_np(v, W, bh, nh):
-	prop_up = 1./(1+np.exp(-(np.dot(v, W) + bh)))
-	h = np.random.binomial(n=1, p = prop_up, size=(v.shape[0], nh))
-	return h
+def sample_h_given_v_np(v, W, bh, nh, mean=False):
+    prop_up = 1./(1+np.exp(-(np.dot(v, W) + bh)))
+    if mean:
+        return prop_up
+    else:
+        return np.random.binomial(n=1, p = prop_up, size=(v.shape[0], nh))
 
 def sample_h_given_v(v, W, bh, nh):
 	prop_up = T.nnet.sigmoid(T.dot(v, W) + bh)

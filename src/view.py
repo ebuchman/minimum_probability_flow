@@ -4,7 +4,7 @@ import pickle
 import rbm
 import os
 from mpf import sample_and_save
-from rbm import rbm_vhv_np, rbm_vhv_2wise_np
+from rbm import rbm_vhv_np, rbm_vhv_2wise_np, sample_h_given_v_np, sample_v_given_h_np
 
 def save_view(samples, nh, nepochs, lr):
 	nsamps, nv = samples.shape
@@ -17,9 +17,9 @@ def save_view(samples, nh, nepochs, lr):
 		plt.imshow(s.reshape(w_img, w_img), cmap='gray')
 	plt.savefig(os.path.join('data', 'plots', 'samples_mnist_nh%d_ne%s_lr%f'%(nh, nepochs, lr)))
 
-def view_simple():
+def view_simple(save_path):
     
-    path = os.path.join('data', 'results', 'mnist_deep_samples_nh500_nh500_.pkl')
+    path = os.path.join('data', 'results', save_path)
     f = open(path)
     d = pickle.load(f)
     f.close()
@@ -35,26 +35,48 @@ def view_simple():
         plt.imshow(s.reshape(n, n), cmap='gray')
     plt.show()
 
-def view_one_step():
-    path = os.path.join('data', 'results', 'mnist_deep_samples_nh500_nh500_.pkl')
-    path = os.path.join('data', 'results', 'mnist_samples_2wise_nh500_ne50_lr0.001000.pkl')
+def view_one_step(save_path):
+    path = os.path.join('data', 'results', save_path)
 
     f = open(path)
     d = pickle.load(f)
     f.close()
     samples, params = d
 
-    w, wh, bh, bv = params
 
     datapath = 'mnistX_binary_lowres.pkl'
-    f = open(datapath, 'r')
+    f = open(os.path.join('/Users', 'BatBuddha', 'Programming', 'Datasets', 'mnist', datapath), 'r')
     X  = pickle.load(f)
     f.close()
 
     X = X[:100]
 
-    #V = rbm_vhv_np(X, w, bh, bv)
-    V = rbm_vhv_2wise_np(X, w, wh, bh, bv)
+    if 'deep' in save_path:
+        V = X
+        # prop up
+        print 'prop up'
+        nlayers = len(params)
+        for i, prm in enumerate(params):
+            w, bh, bv = prm
+            print w.shape, bh.shape, bv.shape
+            mean = False if i==nlayers-1 else True
+            V = sample_h_given_v_np(V, w, bh, len(bh), mean=mean)
+        # prop down
+        print 'prop down'
+        for i, prm in enumerate(params[::-1]):
+            w, bh, bv = prm
+            print w.shape, bh.shape, bv.shape
+            mean = False if i==nlayers-1 else True
+            V = sample_v_given_h_np(V, w, bv, len(bv))
+
+    else:
+        if len(params) == 3:
+            w, bh, bv = params
+            V = rbm_vhv_np(X, w, bh, bv)
+        elif len(params) == 4:
+            w, wh, bh, bv = params
+            V = rbm_vhv_2wise_np(X, w, wh, bh, bv)
+
 
     fig = plt.figure()
     plt.title('real')
@@ -74,7 +96,7 @@ def view_one_step():
         plt.subplot(10,10,2*i+2)
         plt.imshow(V[i].reshape(14, 14))
 
-
+    '''}
     nv, nh = w.shape
     wbound = np.sqrt(6. / (nv + nh))
     w = np.random.uniform(size=w.shape, low=-wbound, high=wbound)
@@ -92,7 +114,7 @@ def view_one_step():
         plt.imshow(X[i].reshape(14, 14))
         plt.subplot(10,10,2*i+2)
         plt.imshow(V[i].reshape(14, 14))
-
+    '''
     plt.show()
 
 
@@ -165,7 +187,9 @@ def load_params_generate_samples():
 
 
 if __name__ == '__main__':
-    view_simple()
-    #view_one_step()
+    save_path = 'mnist_samples_nh200_ne1_lr0.010000.pkl'
+    save_path = 'mnist_deep_samples_nh200_nh200_nh200_.pkl'
+    #view_simple(save_path)
+    view_one_step(save_path)
     #load_params_generate_samples()
     #load_samples_and_params()
