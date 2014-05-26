@@ -6,6 +6,17 @@ import os
 from mpf import sample_and_save
 from rbm import rbm_vhv_np, rbm_vhv_2wise_np
 
+def save_view(samples, nh, nepochs, lr):
+	nsamps, nv = samples.shape
+	w_img = int(nv**0.5)
+	w_plts = int(nsamps**0.5+1)
+
+	plt.figure()
+	for i, s in enumerate(samples):
+		plt.subplot(w_plts, w_plts,i+1)
+		plt.imshow(s.reshape(w_img, w_img), cmap='gray')
+	plt.savefig(os.path.join('data', 'plots', 'samples_mnist_nh%d_ne%s_lr%f'%(nh, nepochs, lr)))
+
 def view_simple():
     
     path = os.path.join('data', 'results', 'mnist_deep_samples_nh500_nh500_.pkl')

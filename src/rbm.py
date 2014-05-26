@@ -143,67 +143,7 @@ def sample_h_given_v_2wise_np(v, W, Wh, bh, nh):
 
     return h
 
-
-def sample_h_given_v_2wise(v, W, Wh, bh, nh):
-	phi = T.dot(v, W) + bh
-	ephi = T.exp(phi)
-
-	adder = np.zeros((nh/2, nh), dtype=theano.config.floatX)
-	for i in xrange(len(adder)):
-		adder[i, 2*i] = 1
-		adder[i, 2*i+1] = 1
-	adder = theano.shared(adder)
-	# wobble =  1 + exp(phi_2i) + exp(phi_{2i+1}) + exp(phi_2i + phi_{21+1} + Wh_i)
-	# p(h_2i = 1 | v) = (exp(phi_2i) + exp(phi_2i + phi_{21+1} + Wh_i ) / wobble
-	# p(h_{2i+1} = 1 | v) = (exp(phi_2i) + exp(phi_2i + phi_{2i+1} + Wh_i )) / wobble
-	# the second term is the same in both - the pair term.  but it must be broadcasted (the kron!)
-	# dotting by adder returns a vector of half the size of sums of pairs of elements
-
-	pairsum = T.dot(ephi, adder.T)
-	first = ephi.T[T.arange(0, nh, 2)].T
-	pairprod = pairsum*first - first**2
-	pairterm = pairprod*T.exp(Wh)
-
-	wobble = 1 + pairsum + pairterm
-
-	pairterm_broadcast = kron(pairterm.dimshuffle(0, 'x'), T.ones(2))
-	wobble_broadcast = kron(wobble.dimshuffle(0, 'x'), T.ones(2))
-
-	prop_up = (ephi + pairterm_broadcast) / wobble_broadcast
-
-	h = theano_rng.binomial(n=1, p = prop_up, dtype=theano.config.floatX, size=(nh,), ndim=1)
-
-	return h
-def sample_h_given_v_2wise(v, W, Wh, bh, nh):
-	phi = T.dot(v, W) + bh
-	ephi = T.exp(phi)
-
-	adder = np.zeros((nh/2, nh), dtype=theano.config.floatX)
-	for i in xrange(len(adder)):
-		adder[i, 2*i] = 1
-		adder[i, 2*i+1] = 1
-	adder = theano.shared(adder)
-	# wobble =  1 + exp(phi_2i) + exp(phi_{2i+1}) + exp(phi_2i + phi_{21+1} + Wh_i)
-	# p(h_2i = 1 | v) = (exp(phi_2i) + exp(phi_2i + phi_{21+1} + Wh_i ) / wobble
-	# p(h_{2i+1} = 1 | v) = (exp(phi_2i) + exp(phi_2i + phi_{2i+1} + Wh_i )) / wobble
-	# the second term is the same in both - the pair term.  but it must be broadcasted (the kron!)
-	# dotting by adder returns a vector of half the size of sums of pairs of elements
-
-	pairsum = T.dot(ephi, adder.T)
-	first = ephi.T[T.arange(0, nh, 2)].T
-	pairprod = pairsum*first - first**2
-	pairterm = pairprod*T.exp(Wh)
-
-	wobble = 1 + pairsum + pairterm
-
-	pairterm_broadcast = kron(pairterm.dimshuffle(0, 'x'), T.ones(2))
-	wobble_broadcast = kron(wobble.dimshuffle(0, 'x'), T.ones(2))
-
-	prop_up = (ephi + pairterm_broadcast) / wobble_broadcast
-
-	h = theano_rng.binomial(n=1, p = prop_up, dtype=theano.config.floatX, size=(nh,), ndim=1)
-
-	return h
+#this only works if v is one dimensional cuz of dimshuffle...
 def sample_h_given_v_2wise(v, W, Wh, bh, nh):
 	phi = T.dot(v, W) + bh
 	ephi = T.exp(phi)
