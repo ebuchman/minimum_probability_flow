@@ -113,14 +113,22 @@ def sample_h_given_v_np(v, W, bh, nh, mean=False):
 def sample_h_given_v(v, W, bh, nh):
 	prop_up = T.nnet.sigmoid(T.dot(v, W) + bh)
 	h = theano_rng.binomial(n=1, p = prop_up, dtype=theano.config.floatX, size=(nh,), ndim=1)
-	return h
+	return h, prop_up
 
-def rbm_vhv(v, W, bv, bh, nv, nh):
-	h = sample_h_given_v(v, W, bh, nh)
+def sample_v_given_h(h, W, bv, nv):
 	prop_down = T.nnet.sigmoid(T.dot(W, h) + bv)
 	v = theano_rng.binomial(n=1, p = prop_down, dtype=theano.config.floatX, size=(nv,), ndim=1)
-
 	return v, prop_down
+
+def rbm_vhv(v, W, bv, bh, nv, nh):
+	h, prop_up = sample_h_given_v(v, W, bh, nh)
+	v, prop_down = sample_v_given_h(h, W, bv, nv)
+	return v, prop_down
+
+def rbm_hvh(h, W, bv, bh, nv, nh):
+	v, prop_down = sample_v_given_h(h, W, bv, nv)
+	h, prop_up = sample_h_given_v(v, W, bh, nh)
+	return h, prop_up
 
 def sample_h_given_v_2wise_np(v, W, Wh, bh, nh):
     phi = np.dot(v, W) + bh

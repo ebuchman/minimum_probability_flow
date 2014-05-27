@@ -348,6 +348,7 @@ class metaMPF():
 			sys.path.append('/export/mlrg/ebuchman/Programming/Sum-of-Functions-Optimizer')
 			from sfo import SFO
 			print 'n batches', n_batches
+			print 'n epochs' , self.n_epochs
 			optimizer = SFO(train_fn, self.mpf.theta.get_value(), np.arange(n_batches))
 			start = time.time()
 			theta_opt = optimizer.optimize(num_passes = self.n_epochs)
