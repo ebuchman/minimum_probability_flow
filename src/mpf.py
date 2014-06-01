@@ -56,19 +56,57 @@ class MPF(object):
 			self.L1 += abs(self.Wh.sum())
 			self.L2 += (self.Wh ** 2).sum()
 
+	def connect_off_states(self, X, effective_batch_size):
+		D, DH = self.n_visible, self.n_hidden
+		W, bh, bv = self.W, self.bh, self.bv
+
+		onehots = T.eye(D)
+		blanks = T.zeros(D)
+	
+		eX = energy(X, W, bh, bv)	
+		eO = energy(onehots, W, bh, bv)
+		eB = energy(blanks, W, bh, bv)
+
+		onehot_dif = eX.dimshuffle(0, 'x') - eO.dimshuffle('x', 0)
+
+		Z_onehot = T.exp(0.5*(onehot_dif))
+		Z_onehot = T.sum(Z_onehot) / effective_batch_size
+
+	#	return Z_onehot 
+
+		Z_blank = T.exp(0.5*(eX - eB))
+		Z_blank = T.sum(Z_blank) / effective_batch_size
+
+		return Z_blank
+
+		#return Z_onehot + Z_blank
+
 	# single epoch full mnist downsamp batch_size 100 : 16 seconds
 	def rbm_K(self, X, effective_batch_size):
 		D, DH = self.n_visible, self.n_hidden
 		W, bh, bv = self.W, self.bh, self.bv
 
+		#one bit flipped connected states
 		Y = X.reshape((effective_batch_size, 1, D), 3) * T.ones((1, D, 1)) #tile out data vectors (repeat each one D times)
-		Y = (Y + T.eye(D).reshape((1, D, D), 3))%2 # flip each bit once 
+		Y1 = (Y + T.eye(D).reshape((1, D, D), 3))%2 # flip each bit once 
 
-		Z = T.exp(0.5*(energy(X, W, bh, bv).dimshuffle(0, 'x') - energy(Y, W, bh, bv)))
+		# minimal activation connected states
+		onehots = T.eye(D)
+		blanks = T.zeros(D)
+	
+		eX = energy(X, W, bh, bv)	
+		eY = energy(Y1, W, bh, bv)
+		eO = energy(onehots, W, bh, bv)
+		eB = energy(blanks, W, bh, bv)
+		
+		edif = eX.dimshuffle(0, 'x') - eY #- eB #- eO.dimshuffle('x', 0) - eB
+
+		Z = T.exp(0.5*edif)
 		K = T.sum(Z) / effective_batch_size
 		K.name = 'K'
+
 		K = T.cast(K, 'float32')
-		return K
+		return K 
 
 	def K_connected_states(self, x, W, bh, bv, D, DH):
 		Y = x.reshape((1, D), 2) * T.ones((D, 1))
@@ -167,18 +205,24 @@ class metaMPF():
 		train_X = self.shared_dataset(train_X)
 		n_batches = np.ceil(n_train / float(batch_size)).astype('int')
 
+		# theano variables for managing data (index minibatches, n examples in batch)
 		index, n_ex = T.iscalars('batch_index', 'n_ex')
-
 		batch_start = index*batch_size
 		batch_stop = T.minimum(n_ex, (index + 1)*batch_size)
 		effective_batch_size = batch_stop - batch_start
 
-
+		# theano variables for learning
 		lr = T.scalar('lr', dtype=theano.config.floatX)
 		mom = T.scalar('mom', dtype=theano.config.floatX)
 
 		if self.k == 1:
+			# this one is for scaning over a batch and getting connectivity for each example
+			# return grads too because T.grads through scan is awful
+			# takes ~3x longer, but can experiment connectivity
 			#K, grads = self.mpf.rbm_K2G(self.X, effective_batch_size)
+
+			# this tiles out the minibatch matrix into a 3D tensor to compute connectivity
+			#K, offs, y, y1, z= self.mpf.rbm_K(self.X, effective_batch_size)
 			K = self.mpf.rbm_K(self.X, effective_batch_size)
 
 		elif self.k == 2:
@@ -193,24 +237,17 @@ class metaMPF():
 		reg = self.L1_reg * self.mpf.L1 + self.L2_reg * self.mpf.L2
 		reg_grad = T.grad(reg, self.mpf.theta)
 
+		# if not scan (tile out matrix into tensor)
 		cost = K + reg
 		grads = T.grad(cost, self.mpf.theta)
-		grads = grads + reg_grad
-		grads.name = 'G'
 
-
-		print "compiling theano functions"
-		get_batch_size = theano.function([index, n_ex], effective_batch_size, name='get_batch_size')
-		batch_cost_grads = theano.function([index, n_ex], [cost, grads], givens={self.X: train_X[batch_start:batch_stop, :]}, name='batch_cost')
-		batch_cost = theano.function([index, n_ex], cost, givens={self.X: train_X[batch_start:batch_stop, :]}, name='batch_cost')
-		batch_grads = theano.function([index, n_ex], grads, givens={self.X: train_X[batch_start:batch_stop, :]}, name='batch_cost')
+		# otherwise
+		#grads = grads + reg_grad
 
 		if param_init == None:
 			self.mpf.theta.set_value(random_theta(D, DH, k=self.k))
 		else:
 			self.mpf.theta.set_value(np.asarray(np.concatenate(param_init), dtype=theano.config.floatX))
-
-		print "actually training ..."
 
 		if optimizer == 'sgd':
 			updates = []
@@ -221,14 +258,7 @@ class metaMPF():
 			updates.append((theta_update, upd))
 			updates.append((theta, theta + upd))
 
-			'''
-			f = theano.function(inputs=[index, n_ex, lr, mom], outputs=[W, bh, bv, Y, Z, K, mom*theta_update], givens={self.X: train_X[batch_start:batch_stop]}, on_unused_input='ignore')
-			aa = f(0, n_train, self.learning_rate, 0.5)
-			for aaa in aa:
-				print aaa.dtype
-			quit()
-			'''
-
+			print 'compiling theano function'
 			if DEBUG:
 				return_values = list(return_values)
 				return_values.append(cost)
@@ -249,6 +279,7 @@ class metaMPF():
 				last_debug = None
 				for minibatch_idx in xrange(n_batches):
 					avg_cost = train_model(minibatch_idx, n_train, self.learning_rate, effective_mom)
+					#print '\t\t', np.isnan(gr).sum(), np.isnan(yy).sum(), np.isnan(yy1).sum(), np.isnan(zz).sum()
 					if DEBUG:
 						return_values, avg_cost, gradients = avg_cost[:-2], avg_cost[-2], avg_cost[-1]
 						print_debug(return_values, last_debug)
@@ -266,6 +297,12 @@ class metaMPF():
 			end = time.time()
 
 		elif optimizer == 'cg' or optimizer == 'bfgs':
+			print "compiling theano functions"
+			get_batch_size = theano.function([index, n_ex], effective_batch_size, name='get_batch_size')
+			batch_cost_grads = theano.function([index, n_ex], [cost, grads], givens={self.X: train_X[batch_start:batch_stop, :]}, name='batch_cost')
+			batch_cost = theano.function([index, n_ex], cost, givens={self.X: train_X[batch_start:batch_stop, :]}, name='batch_cost')
+			batch_grads = theano.function([index, n_ex], grads, givens={self.X: train_X[batch_start:batch_stop, :]}, name='batch_cost')
+
 
 			def train_fn_cost_grads(theta_value):
 				print 'nbatches', n_batches
@@ -310,7 +347,7 @@ class metaMPF():
 				print 'wtf'
 
 			from scipy.optimize import minimize
-			from scipy.optimize import fmin_bfgs
+			from scipy.optimize import fmin_bfgs, fmin_l_bfgs_b
 			if optimizer == 'cg':
 				pass
 			elif optimizer == 'bfgs':
@@ -320,12 +357,17 @@ class metaMPF():
 				disp = True
 				print 'ready to minimize'
 				#result_obj = minimize(train_fn, self.mpf.theta.get_value(), jac=True, method='BFGS', options={'maxiter':self.n_epochs, 'disp':disp}, callback=my_callback())
-				best_theta = fmin_bfgs(f=train_fn_cost, x0=self.mpf.theta.get_value(), fprime=train_fn_grads, disp=1, maxiter=self.n_epochs)
+				#theta_opt = fmin_bfgs(f=train_fn_cost, x0=self.mpf.theta.get_value(), fprime=train_fn_grads, disp=1, maxiter=self.n_epochs)
+				theta_opt, fff, ddd = fmin_l_bfgs_b(func=train_fn_cost, x0=self.mpf.theta.get_value(), fprime=train_fn_grads, disp=1, maxiter=self.n_epochs)
 				print 'done minimize ya right'
 				end = time.time()
-				theta_opt = result_obj.x
 
 		elif optimizer == 'sof':
+			print "compiling theano functions"
+			batch_cost_grads = theano.function([index, n_ex], [cost, grads], givens={self.X: train_X[batch_start:batch_stop, :]}, name='batch_cost')
+			batch_cost = theano.function([index, n_ex], cost, givens={self.X: train_X[batch_start:batch_stop, :]}, name='batch_cost')
+			batch_grads = theano.function([index, n_ex], grads, givens={self.X: train_X[batch_start:batch_stop, :]}, name='batch_cost')
+
 
 			def train_fn(theta_value, i):
 				self.mpf.theta.set_value(np.asarray(theta_value, dtype=theano.config.floatX), borrow=True)
@@ -348,6 +390,7 @@ class metaMPF():
 			sys.path.append('/export/mlrg/ebuchman/Programming/Sum-of-Functions-Optimizer')
 			from sfo import SFO
 			print 'n batches', n_batches
+			print 'n epochs' , self.n_epochs
 			optimizer = SFO(train_fn, self.mpf.theta.get_value(), np.arange(n_batches))
 			start = time.time()
 			theta_opt = optimizer.optimize(num_passes = self.n_epochs)

@@ -5,8 +5,17 @@ import theano.tensor as T
 import os
 
 from util import load_data, plot_samples
-from rbm import energy, energy2wise, debug_energy2wise, sample_rbm, sample_rbm_2wise, rbm_vhv, sample_rbm, random_rbm, compute_dkl, compute_likelihood
+from rbm import energy, energy2wise, debug_energy2wise, sample_rbm, sample_rbm_2wise, sample_v_given_h_np, sample_h_given_v_np, rbm_vhv, sample_rbm, random_rbm, compute_dkl, compute_likelihood
 from debug import print_debug
+
+# save params at shutdown
+def signal_handler(metaMPF, signal=None, frame=None):
+	print 'shutting down'
+	save_path = 'ctrl_c_params_%s_nh%d_ne%d'%(metaMPF.opt, metaMPF.nh, metaMPF.current_epoch)
+	print save_path
+	params = split_theta(metaMPF.mpf.theta.get_value(), metaMPF.nv, metaMPF.nh)
+	save_params(save_path, params)
+	sys.exit(0)
 
 def load_params(nv, nh, k, n_epochs, learning_rate):
 	if k == 1:
@@ -22,25 +31,31 @@ def load_params(nv, nh, k, n_epochs, learning_rate):
 
 	return params
 
-def deep_samples(params, nsamps, sample_every=1000, burnin=1000):
+def deep_samples(params, nsamps, opt, sample_every=1000, burnin=1000):
 	layers = len(params)
 
-	path = 'mnist_deep_samples_'
+	path = 'mnist_deep_samples_%s_'%opt
 
 
 	w, bh, bv = params[-1]
 	path += 'nh%d_'%len(bh)
 	next_samples = sample_rbm(w, bh, bv, nsamps, sample_every=sample_every, burnin=burnin)
+	next_samples = sample_h_given_v_np(next_samples, w, bh, len(bh))
 	for i in xrange(layers-1):
 		w, bh, bv = params[-2-i]
 		path += 'nh%d_'%len(bh)
-		next_samples = sample_v_given_h_np(next_samples, w, bv, len(bv))
+		mean = False if i == layers-2 else True	
+		#next_samples = sample_v_given_h_np(next_samples, w, bv, len(bv), mean=mean)
 
 	path += '.pkl'
 
+	print path
 	f = open(os.path.join('data', 'results', path), 'w')
 	pickle.dump([next_samples, params], f)
 	f.close()
+
+def sample_Gamma(w, bh, bv, sample_every=1000, burnin=1000):
+	pass
 
 
 def sample_from_params():
@@ -51,7 +66,7 @@ def sample_from_params():
 	samples = sample_rbm(params, 20, sample_every=1000, burnin=1000, k=1)
 
 def random_theta(nv, nh, k=1):
-	w_bound = np.sqrt(6. / (nv + nh))
+	w_bound = 4*np.sqrt(6. / (nv + nh))
 	w0 = np.asarray(np.random.uniform(size=(nv*nh), low=-w_bound, high=w_bound), dtype=theano.config.floatX)
 	bh0 = np.asarray(np.zeros(nh), dtype=theano.config.floatX)
 	bv0 = np.asarray(np.zeros(nv), dtype=theano.config.floatX)
