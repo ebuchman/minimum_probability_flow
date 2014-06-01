@@ -41,12 +41,11 @@ def deep_samples(params, nsamps, opt, sample_every=1000, burnin=1000):
 	path += 'nh%d_'%len(bh)
 	next_samples = sample_rbm(w, bh, bv, nsamps, sample_every=sample_every, burnin=burnin)
 	next_samples = sample_h_given_v_np(next_samples, w, bh, len(bh))
-	# do hvh stuff to start with highest level h and prop down deterministically to bottom
 	for i in xrange(layers-1):
 		w, bh, bv = params[-2-i]
 		path += 'nh%d_'%len(bh)
 		mean = False if i == layers-2 else True	
-		next_samples = sample_v_given_h_np(next_samples, w, bv, len(bv), mean=mean)
+		#next_samples = sample_v_given_h_np(next_samples, w, bv, len(bv), mean=mean)
 
 	path += '.pkl'
 
@@ -67,7 +66,7 @@ def sample_from_params():
 	samples = sample_rbm(params, 20, sample_every=1000, burnin=1000, k=1)
 
 def random_theta(nv, nh, k=1):
-	w_bound = np.sqrt(6. / (nv + nh))
+	w_bound = 4*np.sqrt(6. / (nv + nh))
 	w0 = np.asarray(np.random.uniform(size=(nv*nh), low=-w_bound, high=w_bound), dtype=theano.config.floatX)
 	bh0 = np.asarray(np.zeros(nh), dtype=theano.config.floatX)
 	bv0 = np.asarray(np.zeros(nv), dtype=theano.config.floatX)

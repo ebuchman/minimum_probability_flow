@@ -3,7 +3,7 @@ import numpy as np
 import theano
 import time
 import pickle
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import socket
 
 def load_data(ndata=1000):

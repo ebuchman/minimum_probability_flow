@@ -282,15 +282,18 @@ def dec2bin(i, N):
 	
 	return np.asarray(list(bini), dtype=int)
 
+def bin2dec(state):
+	state = list(state[::-1])
+	r = 0
+	while len(state):
+		r *= 2
+		r += state.pop()
+	return r
+
 
 def generate_states(nv):
-
-	states = np.zeros((2**nv, nv))
-
-	row = np.zeros(nv)
-	
 	f = lambda s : dec2bin(s,nv)
-	states = map(f, np.arange(nv))
+	states = map(f, np.arange(2**nv))
 
 	return np.asarray(states)
 
@@ -308,6 +311,13 @@ def compute_probs(params, states):
 
 	return Z, ps/Z, energies
 
+def compute_probs_mrf(params, states):
+	W, bv = params
+	energies = energy_mrf(params, states)
+	ps = np.exp(-energies)
+	Z = ps.sum()
+
+	return Z, ps/Z, energies
 
 def compute_dkl(params, params_fit):
 
@@ -341,8 +351,56 @@ def compute_likelihood(params, X):
 
 	return L
 
+def sample_mrf(params, n_samples=10, sample_every=10, n_flips=1):
+	W, bv = params
+	nv = len(bv)
 
+	start = np.random.binomial(1, 0.5, nv)
+	samples = [start]	
+	rejections = 0
+	for i in xrange(n_samples):
+		for j in xrange(sample_every):
+			to_flip = np.random.randint(nv, size=n_flips)
+			flipped = start.copy()
 
+			prior_p = np.exp(-energy_mrf(params, flipped)) # p before flip
+			flipped[to_flip] = (flipped[to_flip] + 1)%2 # flip bit
+			post_p = np.exp(-energy_mrf(params, flipped)) # p after flip
+			
+			if post_p > prior_p:
+				start = flipped
+			elif np.random.rand() < post_p/prior_p:
+				start = flipped
+			else:
+				rejections += 1
+				start = start
 
+		samples.append(start)
 
+	return samples, rejections
 
+def energy_mrf(params, states):
+	W, bv = params
+	return - np.sum(np.dot(states, W)*states, -1) - np.dot(states, bv)
+
+if __name__ == '__main__':
+	nv = 8
+
+	W = np.random.randn(nv, nv)*np.tri(nv, k=-1).T
+	bv = np.random.randn(nv)
+	params = [W, bv]
+	
+	samples, rej  =	sample_mrf(params, n_samples=100000, sample_every=1, n_flips=3)
+	print rej
+
+	states = generate_states(nv)
+	Z, p, E = compute_probs_mrf(params, states)
+
+	samples_int = map(bin2dec, samples)
+	counts, xs = np.histogram(samples_int, bins=2**nv)
+	sampled_p = counts / float(counts.sum())
+
+	print len(sampled_p[sampled_p <= 0.00001])
+
+	print np.sum(sampled_p * np.log(sampled_p / p))
+	print np.sum((sampled_p - p)**2)
